@@ -125,9 +125,10 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
 - **Level design:** staggered walls create pockets so you can't keep multiple
   Angels in view from one spot (line-of-sight contention is the main difficulty).
 - **Randomized exit** (`src/exitPlacement.js`, pure + tested): the green beacon is
-  placed in a fresh spot **every run / page load** — far from spawn, clear of
-  walls, and hidden from the spawn point by an obstacle (rejection sampling), so
-  finding it always means turning away from danger.
+  placed in a fresh spot **every run / page load** via edge-biased rejection
+  sampling — always in the **outer ring** (never the open centre), far from spawn,
+  clear of walls, and hidden from both the spawn point and the arena centre by an
+  obstacle. So finding it always means exploring and turning away from danger.
 
 ### Win / Lose (`src/gameRules.js`)
 
@@ -154,11 +155,15 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
    BPM rising from ~48 to ~140 as the nearest unseen Angel closes in.
 7. **False cues** — occasional faint grind from a random direction with no real
    Angel behind it.
-8. **Background music** — a slow, looping, minor-key score: a soft triangle
-   arpeggio over a shifting sub-bass through a 4-bar progression (Am–F–C–Em),
-   sequenced against `AudioContext.currentTime`. Also procedural — no files.
+8. **Background music** — a clearly-audible, looping, minor-key horror score: a
+   triangle arpeggio + shifting sub-bass through a 4-bar progression (Am–F–C–Em)
+   with a sparse ringing high tone, sequenced against `AudioContext.currentTime`.
+   Routed straight to master so it plays continuously. Also procedural — no files.
+9. **Footsteps** — soft scuff (low-passed noise) + body thud on a walking
+   cadence whenever the player moves, with slight left/right weight variation.
 
-The `AudioContext` is created on first click to satisfy browser autoplay policy.
+The `AudioContext` is created on the first click (to begin) to satisfy browser
+autoplay policy — so the music and ambience kick in the moment the round starts.
 
 ### Lighting (`src/lighting.js`)
 

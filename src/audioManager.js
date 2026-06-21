@@ -39,7 +39,12 @@ export class AudioManager {
     this._musicRunning = false;
     this._musicNext = 0;
     this._musicStep = 0;
-    this._musicStepDur = 0.5; // seconds per arpeggio step (~120 BPM eighths)
+    this._musicStepDur = 0.55; // seconds per arpeggio step
+
+    // Footstep scheduler state.
+    this.footGain = null;
+    this._footTimer = 0;
+    this._footFlip = 0;
   }
 
   init() {
@@ -65,6 +70,11 @@ export class AudioManager {
     this.heartGain = this.ctx.createGain();
     this.heartGain.gain.value = 0.0;
     this.heartGain.connect(this.master);
+
+    // Footsteps go straight to master (the player's own steps aren't spatialized).
+    this.footGain = this.ctx.createGain();
+    this.footGain.gain.value = 0.9;
+    this.footGain.connect(this.master);
 
     this._noiseBuffer = this._makeNoise(2);
     this.enabled = true;
@@ -390,8 +400,9 @@ export class AudioManager {
     const t = this.ctx.currentTime;
     this.musicGain = this.ctx.createGain();
     this.musicGain.gain.setValueAtTime(0, t);
-    this.musicGain.gain.linearRampToValueAtTime(0.14, t + 4); // gentle fade-in
-    this.musicGain.connect(this.atmosBus);
+    this.musicGain.gain.linearRampToValueAtTime(0.28, t + 2.5); // clearly audible
+    // Straight to master so the score stays present (not ducked by silence cues).
+    this.musicGain.connect(this.master);
     this._musicRunning = true;
     this._musicNext = t + 0.2;
     this._musicStep = 0;
@@ -433,12 +444,17 @@ export class AudioManager {
     const bass = [110.0, 87.31, 130.81, 82.41]; // A2 F2 C2 E2 per bar
 
     const idx = step % arp.length;
-    this._pluck(time, arp[idx], 0.1);
+    this._pluck(time, arp[idx], 0.16);
 
     // New bass note at the top of each 4-step bar.
     if (step % 4 === 0) {
       const bar = Math.floor((step % arp.length) / 4);
-      this._bassNote(time, bass[bar], 0.16);
+      this._bassNote(time, bass[bar], 0.22);
+    }
+
+    // Sparse, eerie high tone every other bar for unease (a held dissonance).
+    if (step % 8 === 2) {
+      this._pluck(time, 659.25, 0.05); // E5, faint and ringing
     }
   }
 
@@ -474,6 +490,64 @@ export class AudioManager {
     sub.start(time);
     osc.stop(time + dur + 0.05);
     sub.stop(time + dur + 0.05);
+  }
+
+  // ---- footsteps ----
+
+  /**
+   * Drive footsteps from the game loop. Pass whether the player is moving; steps
+   * are emitted on a walking cadence and reset when the player stops, so a step
+   * lands almost immediately when they start walking again.
+   * @param {number} dt seconds
+   * @param {boolean} moving
+   */
+  updateFootsteps(dt, moving) {
+    if (!this.enabled) return;
+    if (!moving) {
+      // Prime so the next move triggers a step right away.
+      this._footTimer = 0.34;
+      return;
+    }
+    this._footTimer += dt;
+    const interval = 0.42; // ~brisk walk
+    if (this._footTimer >= interval) {
+      this._footTimer = 0;
+      this._footstep();
+    }
+  }
+
+  /** A soft scuff (filtered noise) + a low body thud; alternates foot weight. */
+  _footstep() {
+    const t = this.ctx.currentTime;
+    this._footFlip ^= 1;
+    const weight = this._footFlip ? 1 : 0.82; // slight L/R variation
+
+    // Scuff: short low-passed noise.
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this._noiseBuffer;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 520;
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.18 * weight, t + 0.005);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    noise.connect(lp).connect(ng).connect(this.footGain);
+    noise.start(t);
+    noise.stop(t + 0.12);
+
+    // Thud: a quick low sine for body weight.
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(90, t);
+    osc.frequency.exponentialRampToValueAtTime(55, t + 0.09);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.16 * weight, t + 0.008);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    osc.connect(og).connect(this.footGain);
+    osc.start(t);
+    osc.stop(t + 0.14);
   }
 
   // ---- stingers ----

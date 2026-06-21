@@ -174,8 +174,10 @@ export class Game {
   _placeExit() {
     const spot = pickExitSpot(Math.random, SPAWN, this.obstacleBoxes, {
       bounds: ARENA_HALF - 2,
-      minDistFromSpawn: 26,
+      minDistFromSpawn: 28,
       clearance: 1.8,
+      minPerimeter: (ARENA_HALF - 2) * 0.62, // keep it out of the open centre
+      alsoHiddenFrom: [{ x: 0, z: 0 }], // tucked away from the arena centre too
     });
     this.exitPos.set(spot.x, 0, spot.z);
     this.exitBeacon.position.set(spot.x, 2, spot.z);
@@ -562,6 +564,7 @@ export class Game {
       this.player.keys.a ||
       this.player.keys.s ||
       this.player.keys.d;
+    this.audio.updateFootsteps(dt, moving && this.player.locked);
     this._bobT += dt * (moving ? 9 : 3);
     const bobAmp = (moving ? 0.03 : 0.012) + this.dread * 0.05;
     this.camera.position.y = this.player.eyeHeight + Math.sin(this._bobT) * bobAmp;

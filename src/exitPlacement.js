@@ -51,11 +51,19 @@ export function isValidExitSpot(p, spawn, boxes, opts = {}) {
     minDistFromSpawn = 26,
     clearance = 1.8,
     requireHidden = true,
+    // Keep the exit out of the open middle: it must sit in the outer ring.
+    minPerimeter = 0,
+    // Extra viewpoints the exit must ALSO be hidden from (e.g. arena centre).
+    alsoHiddenFrom = [],
   } = opts;
   if (Math.abs(p.x) > bounds || Math.abs(p.z) > bounds) return false;
+  if (Math.max(Math.abs(p.x), Math.abs(p.z)) < minPerimeter) return false;
   if (Math.hypot(p.x - spawn.x, p.z - spawn.z) < minDistFromSpawn) return false;
   if (insideAnyBox(p, boxes, clearance)) return false;
   if (requireHidden && !segmentOccluded(spawn, p, boxes)) return false;
+  for (const vp of alsoHiddenFrom) {
+    if (!segmentOccluded(vp, p, boxes)) return false;
+  }
   return true;
 }
 
@@ -69,11 +77,33 @@ export function isValidExitSpot(p, spawn, boxes, opts = {}) {
  * @returns {{x:number, z:number}}
  */
 export function pickExitSpot(rng, spawn, boxes, opts = {}) {
-  const { bounds = 22, tries = 400 } = opts;
-  for (let i = 0; i < tries; i++) {
-    const p = { x: (rng() * 2 - 1) * bounds, z: (rng() * 2 - 1) * bounds };
-    if (isValidExitSpot(p, spawn, boxes, opts)) return p;
+  const { bounds = 22, tries = 600 } = opts;
+
+  // Edge-biased sample: one axis pinned near a wall (rng^2 keeps it close to the
+  // perimeter), the other runs along that edge — never the open centre.
+  const sample = () => {
+    const along = (rng() * 2 - 1) * bounds;
+    const depth = bounds - rng() * rng() * bounds * 0.45;
+    const edge = Math.floor(rng() * 4);
+    if (edge === 0) return { x: along, z: depth };
+    if (edge === 1) return { x: along, z: -depth };
+    if (edge === 2) return { x: depth, z: along };
+    return { x: -depth, z: along };
+  };
+
+  // Try strict first, then progressively relax — but always keep it hidden from
+  // spawn (requireHidden stays true) so it's never just sitting in plain view.
+  const stages = [
+    opts,
+    { ...opts, alsoHiddenFrom: [] }, // drop "hidden from centre"
+    { ...opts, alsoHiddenFrom: [], minPerimeter: 0 }, // drop the outer-ring rule
+  ];
+  for (const stage of stages) {
+    for (let i = 0; i < tries; i++) {
+      const p = sample();
+      if (isValidExitSpot(p, spawn, boxes, stage)) return p;
+    }
   }
-  // Fallback: opposite corner (guaranteed far, may not be hidden).
+  // Last resort: opposite corner (guaranteed far from spawn).
   return { x: -spawn.x, z: -spawn.z };
 }
