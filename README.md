@@ -109,11 +109,11 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
   → start at 1, **+1 every 20s, capped at 6**. (≥3 Angels by midgame.)
 - **Speed:** `speedMultiplier(t) = 1 + 0.05 * floor(t / 15)`
   → **+5% every 15s**.
-- **Angel snap distance:** `angelStepDistance(t, objects) = 1.7 * 1.25 *
+- **Angel snap distance:** `angelStepDistance(t, objects) = 1.53 * 1.25 *
   speedMultiplier(t) * (1 + 0.10 * objects)`
-  → base **1.7 m**, a **+25% baseline bump**, the time curve, **and +10% per
+  → base **1.53 m**, a **+25% baseline bump**, the time curve, **and +10% per
   relic collected** (≈+50% at 5). Difficulty tracks *player progress*, not just
-  time. One missed glance is genuinely costly.
+  time.
 - **Step cadence:** `stepInterval(t) = max(0.4, 0.8 / speedMultiplier(t))`
   → steps quicken over time but never below 0.4s, so motion stays legible.
 

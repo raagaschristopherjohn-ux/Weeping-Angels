@@ -24,7 +24,7 @@ export const BASE_ENEMIES = 1;
 export const ENEMY_INTERVAL_SECONDS = 20; // add an enemy this often
 export const SPEED_INTERVAL_SECONDS = 15; // bump speed this often
 export const SPEED_STEP = 0.05; // +5% per bump
-export const BASE_STEP_DISTANCE = 1.7; // metres an angel snaps per step at t=0
+export const BASE_STEP_DISTANCE = 1.53; // metres an angel snaps per step at t=0
 
 // Objective-driven speed scaling (ties difficulty to player progress).
 export const BASE_SPEED_BUMP = 1.25; // +25% baseline over the old base speed
