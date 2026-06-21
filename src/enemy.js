@@ -53,10 +53,11 @@ export class Enemy {
     // Body: a cone (the classic "angel" silhouette placeholder).
     const bodyGeo = new THREE.ConeGeometry(0.55, 1.8, 5);
     this.material = new THREE.MeshStandardMaterial({
-      color: 0xb8b8c0,
+      color: 0xe8e8f0,
       roughness: 0.9,
       metalness: 0.05,
-      emissive: 0x000000,
+      // Faint self-glow so an Angel is always discernible in shadow.
+      emissive: 0x2a2a33,
     });
     const body = new THREE.Mesh(bodyGeo, this.material);
     body.position.y = 0.9;
@@ -148,9 +149,9 @@ export class Enemy {
     this.group.rotation.y = Math.atan2(this._dir.x, this._dir.z);
   }
 
-  /** Subtle visual tell when observed vs. free (eyes/emissive). */
+  /** Subtle visual tell when observed (red tint) vs. free (faint base glow). */
   _setObservedLook(observed) {
-    this.material.emissive.setHex(observed ? 0x301010 : 0x000000);
+    this.material.emissive.setHex(observed ? 0x402020 : 0x2a2a33);
   }
 
   /** Straight-line ground distance to a point (for proximity checks). */

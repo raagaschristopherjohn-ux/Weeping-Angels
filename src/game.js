@@ -57,8 +57,9 @@ export class Game {
 
   _initScene() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x05060a);
-    this.scene.fog = new THREE.FogExp2(0x05060a, 0.045);
+    this.scene.background = new THREE.Color(0x10141f);
+    // Light fog for depth/atmosphere, but thin enough to see across the arena.
+    this.scene.fog = new THREE.FogExp2(0x10141f, 0.012);
 
     this.camera = new THREE.PerspectiveCamera(
       72,
@@ -70,7 +71,7 @@ export class Game {
     // Floor.
     const floorGeo = new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2);
     const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x14161d,
+      color: 0x3a4152,
       roughness: 1,
       metalness: 0,
     });
@@ -90,7 +91,7 @@ export class Game {
 
   _addBoundaryWalls() {
     const h = 4;
-    const mat = new THREE.MeshStandardMaterial({ color: 0x0c0e14, roughness: 1 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0x2a3040, roughness: 1 });
     const mk = (w, d, x, z) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
       m.position.set(x, h / 2, z);
@@ -105,7 +106,7 @@ export class Game {
 
   _addObstacles() {
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x1b1f29,
+      color: 0x4a5266,
       roughness: 0.95,
     });
     // [centerX, centerZ, sizeX, sizeZ, height]
