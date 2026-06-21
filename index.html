@@ -27,6 +27,13 @@
       #hud .label { color: #a6adc8; }
       #hud .danger { color: #f38ba8; }
 
+      /* Transient status toast (pickups, beacon, placements) */
+      #toast {
+        position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+        color: #a6e3a1; font-size: 18px; text-shadow: 0 0 8px #000;
+        pointer-events: none; z-index: 5; opacity: 0; transition: opacity 0.3s;
+      }
+
       /* Vignette to sell the dread (driven by the dread meter from JS) */
       #vignette {
         position: absolute; inset: 0; pointer-events: none; z-index: 4;
@@ -76,11 +83,15 @@
       <div id="blink"></div>
 
       <div id="hud" class="hidden">
-        <div><span class="label">TIME LEFT:</span> <span id="hud-time">90</span>s</div>
+        <div><span class="label">HELD:</span> <span id="hud-held">0</span></div>
+        <div><span class="label">PLACED:</span> <span id="hud-placed">0</span>/5</div>
+        <div><span class="label">BEACON:</span> <span id="hud-beacon">undiscovered</span></div>
         <div><span class="label">ANGELS:</span> <span id="hud-angels">0</span></div>
         <div><span class="label">NEAREST:</span> <span id="hud-nearest">—</span></div>
         <div id="hud-warning" class="danger"></div>
       </div>
+
+      <div id="toast"></div>
 
       <!-- Start screen + How to Play -->
       <div id="overlay-start" class="overlay">
@@ -108,9 +119,15 @@
               Angel's distance and warns you when one is close.
             </li>
             <li>
-              <span class="rule">Win:</span> survive <b>90 seconds</b>, or reach
-              the <b>green exit beacon</b>. The exit is hidden from your start —
-              you'll have to turn away from danger to find it.
+              <span class="rule">Objective:</span> explore the <b>maze</b> and
+              collect <b>5 glowing relics</b> (you can carry as many as you like),
+              then bring them to the <b>beacon</b> and place all 5 in its slots to
+              activate it and escape. Deliver them all at once or in trips.
+            </li>
+            <li>
+              <span class="rule">Careful:</span> every relic you pick up makes the
+              Angels <b>faster</b> (+10% each). The beacon only shows on your HUD
+              once you get near it or see it.
             </li>
             <li>
               Beware <b>decoy statues</b>: some figures never move. Only watching

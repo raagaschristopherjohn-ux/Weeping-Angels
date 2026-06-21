@@ -80,10 +80,14 @@ export function rayAABB(origin, dir, box, maxDist = Infinity) {
  *   @param {number} [options.maxDistance=Infinity]  beyond this, treated as unseen
  *   @param {number} [options.enemyRadius=0]   widens the cone so a partly-framed
  *                                             enemy still counts as seen
+ *   @param {(origin:{x,y,z}, target:{x,y,z}) => boolean} [options.occluder]
+ *      optional custom line-of-sight test (returns true if BLOCKED). When given,
+ *      it replaces the AABB loop — used for grid/maze occlusion that scales to
+ *      large maps without iterating every wall.
  * @returns {boolean}
  */
 export function isEnemySeen(cameraState, enemyPosition, obstacles = [], options = {}) {
-  const { fovDegrees = 75, maxDistance = Infinity, enemyRadius = 0 } = options;
+  const { fovDegrees = 75, maxDistance = Infinity, enemyRadius = 0, occluder } = options;
 
   const toEnemy = sub(enemyPosition, cameraState.position);
   const distance = length(toEnemy);
@@ -118,16 +122,19 @@ export function isEnemySeen(cameraState, enemyPosition, obstacles = [], options 
   if (angle > halfFovRad + angularRadius) return false;
 
   // --- (2) Occlusion test ---
-  // Cast toward the enemy; if any obstacle is hit strictly before we reach the
-  // enemy, the line of sight is blocked. Note: obstacles are static geometry
-  // only — other Angels do NOT occlude each other by design, so one Angel can't
-  // "hide" behind another. Each enemy is evaluated independently by the caller,
-  // so "multiple enemies in view at once" is simply N independent calls.
-  const epsilon = 1e-4;
-  for (const box of obstacles) {
-    const hit = rayAABB(cameraState.position, dirToEnemy, box, distance);
-    if (hit < distance - epsilon) {
-      return false; // something solid is between camera and enemy
+  // A custom occluder (e.g. maze grid raycast) takes precedence and scales to
+  // large maps; otherwise fall back to the AABB loop. Either way: static
+  // geometry only — Angels do NOT occlude each other, and each enemy is
+  // evaluated independently, so "multiple enemies in view" is just N calls.
+  if (occluder) {
+    if (occluder(cameraState.position, enemyPosition)) return false;
+  } else {
+    const epsilon = 1e-4;
+    for (const box of obstacles) {
+      const hit = rayAABB(cameraState.position, dirToEnemy, box, distance);
+      if (hit < distance - epsilon) {
+        return false; // something solid is between camera and enemy
+      }
     }
   }
 

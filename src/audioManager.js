@@ -59,9 +59,19 @@ export class AudioManager {
     }
     this.ctx = new AC();
 
+    // Master bus -> limiter -> destination. The limiter (a compressor tuned as a
+    // brickwall-ish limiter) lets us push the mix louder without clipping.
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -6;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.003;
+    this.limiter.release.value = 0.25;
+    this.limiter.connect(this.ctx.destination);
+
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.7;
-    this.master.connect(this.ctx.destination);
+    this.master.gain.value = 1.0; // louder; limiter catches peaks
+    this.master.connect(this.limiter);
 
     this.atmosBus = this.ctx.createGain();
     this.atmosBus.gain.value = 1;
@@ -73,7 +83,7 @@ export class AudioManager {
 
     // Footsteps go straight to master (the player's own steps aren't spatialized).
     this.footGain = this.ctx.createGain();
-    this.footGain.gain.value = 0.9;
+    this.footGain.gain.value = 1.3;
     this.footGain.connect(this.master);
 
     this._noiseBuffer = this._makeNoise(2);
@@ -105,7 +115,7 @@ export class AudioManager {
     // (1) Ambient bed: 55 / 56.5 / 110 Hz through an LFO-swept lowpass.
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.13, t + 2.5);
+    gain.gain.linearRampToValueAtTime(0.22, t + 2.5); // louder ambient bed
     gain.connect(this.atmosBus);
 
     const filter = this.ctx.createBiquadFilter();
@@ -400,7 +410,7 @@ export class AudioManager {
     const t = this.ctx.currentTime;
     this.musicGain = this.ctx.createGain();
     this.musicGain.gain.setValueAtTime(0, t);
-    this.musicGain.gain.linearRampToValueAtTime(0.28, t + 2.5); // clearly audible
+    this.musicGain.gain.linearRampToValueAtTime(0.42, t + 2.5); // clearly audible
     // Straight to master so the score stays present (not ducked by silence cues).
     this.musicGain.connect(this.master);
     this._musicRunning = true;
@@ -548,6 +558,38 @@ export class AudioManager {
     osc.connect(og).connect(this.footGain);
     osc.start(t);
     osc.stop(t + 0.14);
+  }
+
+  // ---- objective cues ----
+
+  /** Bright rising blip when an object is collected. */
+  pickupCue() {
+    if (!this.enabled) return;
+    this._note(523.25, 0, 0.12, 'triangle', 0.22); // C5
+    this._note(783.99, 0.07, 0.16, 'triangle', 0.2); // G5
+  }
+
+  /** Confirming two-note chime when an object is placed into a beacon slot. */
+  placeCue(slotIndex = 0) {
+    if (!this.enabled) return;
+    // Rises slightly per slot so filling all five feels like progress.
+    const base = 440 * Math.pow(2, slotIndex / 12);
+    this._note(base, 0, 0.18, 'sine', 0.22);
+    this._note(base * 1.5, 0.08, 0.24, 'sine', 0.18);
+  }
+
+  /** Low shimmer when the beacon is first discovered. */
+  discoverCue() {
+    if (!this.enabled) return;
+    [196, 294, 392, 588].forEach((f, i) =>
+      this._note(f, i * 0.1, 0.6, 'sine', 0.18)
+    );
+  }
+
+  /** Triumphant chord when the beacon activates (all slots filled). */
+  beaconActivateCue() {
+    if (!this.enabled) return;
+    [392, 494, 587, 784].forEach((f) => this._note(f, 0, 1.2, 'sine', 0.2));
   }
 
   // ---- stingers ----

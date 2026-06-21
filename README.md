@@ -1,9 +1,11 @@
 # Weeping Angels — *Don't Look Away*
 
-A first-person stealth-horror game in the browser. One or more "Angels" stalk
-you across a dark space. **They are frozen for as long as you are looking at
-them** — the instant they leave your view, they take a step closer. The threat
-is never in what you can see. It's in looking away.
+A first-person stealth-horror game in the browser. "Angels" stalk you through a
+dark **maze**. **They are frozen for as long as you are looking at them** — the
+instant they leave your view, they snap closer. Explore the maze, collect **5
+relics**, and place them in the **beacon** to escape — but every relic you grab
+makes the Angels faster. The threat is never in what you can see. It's in looking
+away.
 
 Built with **Vite + vanilla JS + Three.js**.
 
@@ -46,9 +48,9 @@ npm test          # one-shot (vitest run)
 npm run test:watch
 ```
 
-Current status: **63 tests passing** across `tests/visibility.test.js`,
-`tests/difficulty.test.js`, `tests/dread.test.js`, and
-`tests/exitPlacement.test.js`.
+Current status: **67 tests passing** across `tests/visibility.test.js`,
+`tests/difficulty.test.js`, `tests/dread.test.js`, `tests/maze.test.js`, and
+`tests/placement.test.js`.
 
 ---
 
@@ -107,36 +109,45 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
   → start at 1, **+1 every 20s, capped at 6**. (≥3 Angels by midgame.)
 - **Speed:** `speedMultiplier(t) = 1 + 0.05 * floor(t / 15)`
   → **+5% every 15s**.
-- **Step distance:** `stepDistanceFor(t) = 1.7 * speedMultiplier(t)`
-  → base **1.7 m** per snap, growing 5%/15s. The base is large enough that one
-  missed glance is genuinely costly.
+- **Angel snap distance:** `angelStepDistance(t, objects) = 1.7 * 1.25 *
+  speedMultiplier(t) * (1 + 0.10 * objects)`
+  → base **1.7 m**, a **+25% baseline bump**, the time curve, **and +10% per
+  relic collected** (≈+50% at 5). Difficulty tracks *player progress*, not just
+  time. One missed glance is genuinely costly.
 - **Step cadence:** `stepInterval(t) = max(0.4, 0.8 / speedMultiplier(t))`
   → steps quicken over time but never below 0.4s, so motion stays legible.
 
-### Forced blink, dread & level design (`src/game.js`, `src/dread.js`)
+### Maze, spawns & objectives (`src/maze.js`, `src/placement.js`, `src/game.js`)
 
+- **Maze** (`generateMaze`, pure + tested): a ~105×105 grid maze (recursive
+  backtracker + light braiding for loops/alternate routes & dead ends). Rendered
+  as a **single InstancedMesh** (1 draw call); occlusion & collision use a grid
+  **DDA raycast / cell lookup** (`segmentBlocked`, `isSolidWorld`) that scales to
+  any map size instead of looping wall AABBs. A braided maze is fully connected,
+  so the beacon and all relics are **guaranteed reachable** (`allOpenReachable`
+  asserts this in tests). Generated once per page load.
+- **Randomized spawns** (`pickSpaced`/`pickFar`, pure + tested): on each run the
+  **player**, **angels**, **relics**, and **beacon** are placed on random valid
+  open cells — never inside walls, angels never within **26 m** of the player,
+  relics spaced apart and away from the beacon.
+- **Objectives:** collect **5 glowing relics** (carry as many as you like), then
+  place them in the beacon's **5 slots**. The beacon tracks total slots filled
+  regardless of order/batching — so *collect-all-then-deliver* and *deliver
+  incrementally* both work. The beacon only appears on the HUD once **discovered**
+  (proximity or line of sight). HUD shows held/placed; toasts + audio cues fire on
+  pickup, discovery, each placement, and activation.
 - **Forced blink:** every **4–6s** the screen blacks out for **150–250ms** (you
-  can't prevent it) and **every** Angel gets one free move while you're blind —
-  preceded by a silence cue and a synced light flicker.
+  can't prevent it) and **every** Angel gets one free move — preceded by a silence
+  cue and a synced light flicker.
 - **Dread meter** (`computeDread`, pure + tested): rises while an Angel is close
-  **and** unseen (within 14 m), decays when safe, clamped to [0, 1]. Drives a
-  tightening/darkening vignette, desaturation, camera sway, and the audio dread
-  layers.
-- **Level design:** staggered walls create pockets so you can't keep multiple
-  Angels in view from one spot (line-of-sight contention is the main difficulty).
-- **Randomized exit** (`src/exitPlacement.js`, pure + tested): the green beacon is
-  placed in a fresh spot **every run / page load** via edge-biased rejection
-  sampling — always in the **outer ring** (never the open centre), far from spawn,
-  clear of walls, and hidden from both the spawn point and the arena centre by an
-  obstacle. So finding it always means exploring and turning away from danger.
+  **and** unseen, decays when safe; drives vignette, desaturation, camera sway,
+  and the audio dread layers.
 
-### Win / Lose (`src/gameRules.js`)
+### Win / Lose (`src/game.js`, `src/gameRules.js`)
 
-- **Lose:** any Angel comes within `LOSE_RADIUS` (1.6m) of the player → *Game
-  Over*. Loss takes priority over a simultaneous win.
-- **Win (both implemented, first to trigger):**
-  - **Survive 90 seconds**, or
-  - **reach the green exit beacon** in the far corner.
+- **Lose:** any Angel comes within `LOSE_RADIUS` (1.6m) of the player → *Game Over*.
+- **Win:** place all **5 relics** in the beacon → it activates → *You Escaped*.
+  (This replaces the old survive-timer / fixed-exit win.)
 
 ### Sound (`src/audioManager.js`)
 
@@ -161,9 +172,12 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
    Routed straight to master so it plays continuously. Also procedural — no files.
 9. **Footsteps** — soft scuff (low-passed noise) + body thud on a walking
    cadence whenever the player moves, with slight left/right weight variation.
+10. **Objective cues** — pickup / placement / beacon-discovery / activation chimes.
 
-The `AudioContext` is created on the first click (to begin) to satisfy browser
-autoplay policy — so the music and ambience kick in the moment the round starts.
+The whole mix runs **louder** now (ambient, music and footstep gains raised)
+through a master **limiter** (`DynamicsCompressor` tuned as a brickwall limiter)
+so the louder bus doesn't clip. The `AudioContext` is created on the first click
+(to begin) to satisfy browser autoplay policy.
 
 ### Lighting (`src/lighting.js`)
 
@@ -182,9 +196,11 @@ tints red on loss, green on win.
 - **Difficulty t=0 guard** — formulas return base values for `t ≤ 0` and
   non-finite input (unit-tested).
 - **No per-frame allocation in hot paths** — player/enemy/lighting reuse scratch
-  vectors and a reused camera-state object; visibility uses analytic ray-AABB
-  math instead of allocating a `THREE.Raycaster` per check; the frame delta is
-  clamped to avoid huge jumps after a pause. Targets a stable 60fps with 6 Angels.
+  vectors and a reused camera-state object; the frame delta is clamped to avoid
+  huge jumps after a pause.
+- **Scales to the bigger maze** — all walls render in a **single InstancedMesh**
+  (1 draw call), and occlusion/collision use **O(path-length) grid DDA** lookups
+  rather than iterating hundreds of wall AABBs. Targets a stable 60fps.
 
 ---
 
@@ -197,18 +213,20 @@ src/
   game.js          orchestration (only file touching renderer + DOM)
   player.js        FPS camera, pointer lock, WASD
   enemy.js         Angel AI (snap stepping, freeze-on-sight) + decoy statues
-  visibility.js    pure "is this enemy seen?" (FOV + occlusion)
-  difficulty.js    pure scaling curves
+  maze.js          pure maze generation + grid raycast/occlusion (no Three.js)
+  placement.js     pure randomized spawn/object placement
+  visibility.js    pure "is this enemy seen?" (FOV + occlusion/occluder)
+  difficulty.js    pure scaling curves (incl. per-object angel speed)
   dread.js         pure dread-meter logic
-  exitPlacement.js pure random-exit placement (valid + hidden)
-  gameRules.js     pure win/lose evaluation
-  audioManager.js  procedural Web Audio (ambient, dread, spatial, heartbeat…)
+  gameRules.js     pure lose (proximity) evaluation
+  audioManager.js  procedural Web Audio (ambient, music, spatial, heartbeat…)
   lighting.js      low ambient + camera-bound flashlight
 tests/
   visibility.test.js
   difficulty.test.js   (also covers gameRules win/lose logic)
   dread.test.js
-  exitPlacement.test.js
+  maze.test.js         (reachability guarantee + grid queries)
+  placement.test.js
 README.md
 ```
 
@@ -216,12 +234,17 @@ README.md
 
 ## Verification performed
 
-- `npm test` → **63/63 passing**.
+- `npm test` → **67/67 passing**.
 - `npm run build` → clean production bundle.
-- Headless **Playwright** end-to-end (`--use-gl=swiftshader`): page loads, the
-  How-to-Play start screen shows, clicking starts the game and the HUD goes live,
-  the flashlight cone + lunging Angel render, a forced blink fires, and the
-  win → restart → lose flow all work with **zero console errors / page errors**.
+- Headless **Playwright** end-to-end (`--use-gl=swiftshader`): randomized spawns
+  never place the player/angels/relics/beacon inside walls; nearest angel respects
+  the 26 m rule; **both** delivery playstyles (collect-all-then-deliver and
+  incremental) activate the beacon → *won*; per-object speed scaling increments
+  correctly; walls render in 1 draw call — all with **zero console errors**.
+
+> Software-rendered (swiftshader) FPS in headless is not representative of real
+> hardware; the perf design (single instanced-mesh draw call + O(path) grid
+> raycast) is what holds 60fps on a GPU.
 
 > Pointer Lock can't engage in headless mode, so mouse-look was verified
 > manually in a desktop browser: lock on click, look with mouse, Esc releases
@@ -231,11 +254,16 @@ README.md
 
 ## Known limitations / next steps
 
-- **Collision** is simple AABB push-out; fast diagonal movement into a corner
-  can feel slightly sticky. A swept-capsule resolver would be smoother.
-- Angels currently path in a straight line to your last-known position — they
-  don't navigate *around* obstacles, so one can briefly bunch up behind a box.
-  A nav-grid / A* step target is the natural next step.
+- **Angels phase through walls.** They snap straight toward your last-known
+  position and ignore maze walls (supernatural, and it keeps the threat real even
+  in a maze). Visibility *does* respect walls, so the tension is about managing
+  what you can see. A nav-grid / A* path would make them corridor-bound instead —
+  flag if you'd prefer that.
+- **The maze regenerates per page load, not per restart.** "Play Again" reshuffles
+  spawns/relics/beacon within the same maze; reload for a brand-new maze. Easy to
+  switch to per-restart regeneration if you'd rather.
+- **Collision** is grid cell lookup with axis separation; fast diagonal moves into
+  a corner can feel slightly sticky.
 - No mobile/touch controls (Pointer Lock is desktop-oriented).
 - Visuals are deliberate geometric placeholders (cones + spheres). Swapping in
   proper Angel models and a textured environment is purely cosmetic.

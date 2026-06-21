@@ -26,6 +26,10 @@ export const SPEED_INTERVAL_SECONDS = 15; // bump speed this often
 export const SPEED_STEP = 0.05; // +5% per bump
 export const BASE_STEP_DISTANCE = 1.7; // metres an angel snaps per step at t=0
 
+// Objective-driven speed scaling (ties difficulty to player progress).
+export const BASE_SPEED_BUMP = 1.25; // +25% baseline over the old base speed
+export const PER_OBJECT_SPEED = 0.1; // +10% per collected object (≈+50% at 5)
+
 /**
  * Number of Angels that should be active at elapsed time `t`.
  * @param {number} t elapsed seconds
@@ -72,4 +76,20 @@ export function stepInterval(t, baseInterval = 0.8, floor = 0.4) {
  */
 export function stepDistanceFor(t, base = BASE_STEP_DISTANCE) {
   return base * speedMultiplier(t);
+}
+
+/**
+ * Full angel snap distance: the tuned base, a +25% baseline bump, the time-based
+ * multiplier, AND a per-object multiplier (+10% per object collected). So an
+ * angel is ~50% faster from objects alone by the 5th pickup, on top of the
+ * baseline and time scaling.
+ * @param {number} t elapsed seconds
+ * @param {number} [objectsCollected=0]
+ * @param {number} [base=BASE_STEP_DISTANCE]
+ * @returns {number}
+ */
+export function angelStepDistance(t, objectsCollected = 0, base = BASE_STEP_DISTANCE) {
+  const objs = Math.max(0, Number.isFinite(objectsCollected) ? objectsCollected : 0);
+  const objMult = 1 + PER_OBJECT_SPEED * objs;
+  return base * BASE_SPEED_BUMP * speedMultiplier(t) * objMult;
 }

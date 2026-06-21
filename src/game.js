@@ -1,10 +1,11 @@
 /**
  * game.js
  * --------
- * Glue layer: scene/renderer, arena, player, Angels, decoys, lighting, audio,
- * HUD, difficulty, forced blink, dread meter, and win/lose. All pure logic lives
- * in visibility.js / difficulty.js / gameRules.js / dread.js; this is the only
- * file that touches the renderer + DOM.
+ * Glue layer: scene/renderer, maze, player, Angels, decoys, collectibles +
+ * beacon objective, lighting, audio, HUD, difficulty, forced blink, dread meter,
+ * and win/lose. Pure logic lives in maze.js / placement.js / visibility.js /
+ * difficulty.js / gameRules.js / dread.js; this is the only file touching the
+ * renderer + DOM.
  */
 import * as THREE from 'three';
 import { Player } from './player.js';
@@ -12,34 +13,52 @@ import { Enemy } from './enemy.js';
 import { Lighting } from './lighting.js';
 import { AudioManager } from './audioManager.js';
 import { isEnemySeen } from './visibility.js';
-import { activeEnemies, stepInterval, stepDistanceFor } from './difficulty.js';
+import { activeEnemies, stepInterval, angelStepDistance } from './difficulty.js';
 import { computeDread } from './dread.js';
-import { pickExitSpot } from './exitPlacement.js';
-import { evaluateGameState, SURVIVE_SECONDS, LOSE_RADIUS } from './gameRules.js';
+import { generateMaze } from './maze.js';
+import { pickSpaced, pickFar, dist } from './placement.js';
+import { isCaught, LOSE_RADIUS } from './gameRules.js';
 
-const ARENA_HALF = 24;
-const SPAWN = { x: -(ARENA_HALF - 3), z: -(ARENA_HALF - 3) };
+// Maze + world.
+const MAZE_COLS = 10;
+const MAZE_ROWS = 10;
+const CELL = 5;
+const WALL_HEIGHT = 4.5;
+
+// Objective tuning.
+const NUM_OBJECTS = 5;
+const PICKUP_RADIUS = 1.9;
+const DELIVER_RADIUS = 3.6;
+const DISCOVER_RADIUS = 9; // beacon auto-discovered within this range
+const DISCOVER_SIGHT = 28; // ...or seen (clear LoS) within this range
+const ANGEL_MIN_SPAWN_DIST = 26; // angels never spawn closer than this to player
+const OBJECT_MIN_SPACING = 14;
+const BEACON_MIN_DIST = 38;
 
 // Forced-blink tuning.
-const BLINK_MIN = 4; // seconds
+const BLINK_MIN = 4;
 const BLINK_MAX = 6;
 const BLINK_DUR_MIN = 0.15;
 const BLINK_DUR_MAX = 0.25;
-const SILENCE_LEAD = 0.4; // seconds of near-silence before a blink
+const SILENCE_LEAD = 0.4;
 
 export class Game {
   constructor(appEl) {
     this.app = appEl;
-    this.state = 'start'; // start | playing | paused | won | lost
+    this.state = 'start';
     this.elapsed = 0;
     this.clock = new THREE.Clock(false);
 
     this.enemies = [];
     this.decoys = [];
-    this.obstacleBoxes = []; // AABBs for the visibility occlusion test
+    this.objects = [];
 
-    // Reused scratch (no per-frame allocation).
-    this._exitFlat = { x: 0, z: 0 };
+    // Objective counters.
+    this.heldCount = 0;
+    this.objectsCollected = 0; // total ever collected (drives angel speed)
+    this.placedCount = 0;
+
+    // Reused scratch.
     this._playerFlat = { x: 0, z: 0 };
     this._enemyFlats = [];
 
@@ -54,6 +73,9 @@ export class Game {
     this.falseCueTimer = 0;
     this._prevYaw = 0;
     this._bobT = 0;
+
+    // Occluder closure for visibility (grid raycast — scales to the big maze).
+    this._occluder = (o, p) => this.maze.segmentBlocked(o.x, o.z, p.x, p.z);
 
     this._initRenderer();
     this._initScene();
@@ -71,25 +93,32 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = false; // keep it cheap for 60fps
+    this.renderer.shadowMap.enabled = false;
     this.app.appendChild(this.renderer.domElement);
   }
 
   _initScene() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x080a12);
-    this.scene.fog = new THREE.FogExp2(0x080a12, 0.02);
+    this.scene.fog = new THREE.FogExp2(0x080a12, 0.022);
 
     this.camera = new THREE.PerspectiveCamera(
       72,
       window.innerWidth / window.innerHeight,
       0.1,
-      200
+      300
     );
 
-    const floorGeo = new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2);
+    // Maze is generated once per page load (NOT per restart — see README note).
+    this.maze = generateMaze(MAZE_COLS, MAZE_ROWS, Math.random, { cell: CELL });
+
+    // Floor sized to the maze.
+    const floorGeo = new THREE.PlaneGeometry(
+      this.maze.worldHalfW * 2,
+      this.maze.worldHalfH * 2
+    );
     const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x2c3242,
+      color: 0x2a3040,
       roughness: 1,
       metalness: 0,
     });
@@ -97,96 +126,149 @@ export class Game {
     floor.rotation.x = -Math.PI / 2;
     this.scene.add(floor);
 
-    this._addBoundaryWalls();
-    this._addObstacles();
-    this._addExit();
+    this._buildMazeMeshes();
+    this._initObjectives();
   }
 
-  _addBoundaryWalls() {
-    const h = 4.5;
-    const mat = new THREE.MeshStandardMaterial({ color: 0x232838, roughness: 1 });
-    const mk = (w, d, x, z) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, h / 2, z);
-      this.scene.add(m);
-    };
-    const s = ARENA_HALF;
-    mk(s * 2, 0.5, 0, -s);
-    mk(s * 2, 0.5, 0, s);
-    mk(0.5, s * 2, -s, 0);
-    mk(0.5, s * 2, s, 0);
-  }
+  /** One InstancedMesh for every solid cell — a single draw call for all walls. */
+  _buildMazeMeshes() {
+    const { gw, gh, cell, solid } = this.maze;
+    let count = 0;
+    for (let gy = 0; gy < gh; gy++)
+      for (let gx = 0; gx < gw; gx++) if (solid[gy][gx]) count++;
 
-  _addObstacles() {
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x3c4458,
-      roughness: 0.95,
-    });
-    // Layout goals: (a) a central wall blocks the spawn->exit diagonal so the
-    // exit is never visible from the start; (b) staggered walls create pockets so
-    // you cannot keep multiple angels in view from one spot — line-of-sight
-    // contention is the main difficulty. [cx, cz, sx, sz, height]
-    const defs = [
-      [0, 0, 20, 1.5, 4], // central diagonal blocker (through origin)
-      [-8, -12, 1.5, 14, 4], // vertical wall near spawn
-      [8, 12, 1.5, 14, 4], // vertical wall mid-north
-      [16, 17, 13, 1.5, 4], // screen hiding the exit corner from the south
-      [-15, 5, 4, 4, 3.5], // cover blocks
-      [14, -6, 4, 4, 3.5],
-      [-3, 16, 4, 4, 3.5],
-      [4, -16, 4, 4, 3.5],
-    ];
-    for (const [cx, cz, sx, sz, hy] of defs) {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, hy, sz), mat);
-      mesh.position.set(cx, hy / 2, cz);
-      this.scene.add(mesh);
-      this.obstacleBoxes.push({
-        min: { x: cx - sx / 2, y: 0, z: cz - sz / 2 },
-        max: { x: cx + sx / 2, y: hy, z: cz + sz / 2 },
-      });
+    const geo = new THREE.BoxGeometry(cell, WALL_HEIGHT, cell);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x3a4257, roughness: 0.95 });
+    const inst = new THREE.InstancedMesh(geo, mat, count);
+    const m = new THREE.Matrix4();
+    let i = 0;
+    for (let gy = 0; gy < gh; gy++) {
+      for (let gx = 0; gx < gw; gx++) {
+        if (!solid[gy][gx]) continue;
+        m.makeTranslation(this.maze.centerX(gx), WALL_HEIGHT / 2, this.maze.centerZ(gy));
+        inst.setMatrixAt(i++, m);
+      }
     }
+    inst.instanceMatrix.needsUpdate = true;
+    this.scene.add(inst);
+    this.wallMesh = inst;
   }
 
-  _addExit() {
-    // Position is randomized per run in _placeExit(); start at a placeholder.
-    this.exitPos = new THREE.Vector3(ARENA_HALF - 3, 0, ARENA_HALF - 3);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x10301a,
-      emissive: 0x33ff88,
-      emissiveIntensity: 1.4,
-    });
-    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 4, 16), mat);
-    pillar.position.set(this.exitPos.x, 2, this.exitPos.z);
-    this.scene.add(pillar);
-    this.exitBeacon = pillar;
+  /** Create the 5 collectibles and the beacon (positions set in _placeObjectives). */
+  _initObjectives() {
+    const objGeo = new THREE.IcosahedronGeometry(0.45, 0);
+    for (let i = 0; i < NUM_OBJECTS; i++) {
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x0a2230,
+        emissive: 0x33ddff,
+        emissiveIntensity: 1.7,
+        roughness: 0.4,
+      });
+      const mesh = new THREE.Mesh(objGeo, mat);
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this.objects.push({ pos: { x: 0, z: 0 }, mesh, collected: false });
+    }
 
-    // Short-range glow so it doesn't light the whole map (keeps it hidden).
-    const glow = new THREE.PointLight(0x33ff88, 1.4, 9, 2);
-    glow.position.set(this.exitPos.x, 2.5, this.exitPos.z);
-    this.scene.add(glow);
-    this.exitGlow = glow;
+    this.beacon = { pos: { x: 0, z: 0 }, discovered: false, slots: [] };
+    const group = new THREE.Group();
+
+    this.beaconPillarMat = new THREE.MeshStandardMaterial({
+      color: 0x10201a,
+      emissive: 0x1b3a55,
+      emissiveIntensity: 0.4,
+      roughness: 0.6,
+    });
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.7, 0.95, 4.5, 18),
+      this.beaconPillarMat
+    );
+    pillar.position.y = 2.25;
+    group.add(pillar);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.5, 0.12, 8, 32),
+      new THREE.MeshStandardMaterial({ color: 0x081018, emissive: 0x2266aa })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.25;
+    group.add(ring);
+    this.beaconRing = ring;
+
+    for (let i = 0; i < NUM_OBJECTS; i++) {
+      const a = (i / NUM_OBJECTS) * Math.PI * 2;
+      const sx = Math.cos(a) * 2.4;
+      const sz = Math.sin(a) * 2.4;
+      const ped = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.36, 0.42, 0.5, 12),
+        new THREE.MeshStandardMaterial({ color: 0x141a26, roughness: 0.9 })
+      );
+      ped.position.set(sx, 0.25, sz);
+      group.add(ped);
+
+      const markMat = new THREE.MeshStandardMaterial({
+        color: 0x223040,
+        emissive: 0x000000,
+        emissiveIntensity: 1.2,
+        roughness: 0.4,
+      });
+      const mark = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 0), markMat);
+      mark.position.set(sx, 0.75, sz);
+      mark.visible = false;
+      group.add(mark);
+      this.beacon.slots.push({ mark, markMat, filled: false });
+    }
+
+    const glow = new THREE.PointLight(0x33aaff, 0, 16, 2);
+    glow.position.set(0, 2.6, 0);
+    group.add(glow);
+    this.beaconGlow = glow;
+
+    this.scene.add(group);
+    this.beaconGroup = group;
   }
 
-  /**
-   * Randomly place the exit: a fresh, valid spot every run (and every page
-   * load), far from spawn, clear of walls, and hidden from the spawn point.
-   */
-  _placeExit() {
-    const spot = pickExitSpot(Math.random, SPAWN, this.obstacleBoxes, {
-      bounds: ARENA_HALF - 2,
-      minDistFromSpawn: 28,
-      clearance: 1.8,
-      minPerimeter: (ARENA_HALF - 2) * 0.62, // keep it out of the open centre
-      alsoHiddenFrom: [{ x: 0, z: 0 }], // tucked away from the arena centre too
+  _placeObjectives() {
+    const cells = this.maze.openCellsWorld;
+    const player = { x: this.player.position.x, z: this.player.position.z };
+
+    // Beacon: far from the player (still guaranteed reachable — maze is connected).
+    this.beacon.pos = pickFar(Math.random, cells, player, BEACON_MIN_DIST);
+    this.beaconGroup.position.set(this.beacon.pos.x, 0, this.beacon.pos.z);
+
+    // Objects: spaced apart, away from the player and the beacon.
+    const spots = pickSpaced(Math.random, cells, NUM_OBJECTS, {
+      minSpacing: OBJECT_MIN_SPACING,
+      avoid: [
+        { x: player.x, z: player.z, dist: 10 },
+        { x: this.beacon.pos.x, z: this.beacon.pos.z, dist: 10 },
+      ],
     });
-    this.exitPos.set(spot.x, 0, spot.z);
-    this.exitBeacon.position.set(spot.x, 2, spot.z);
-    this.exitGlow.position.set(spot.x, 2.5, spot.z);
+    this.objects.forEach((o, i) => {
+      const s = spots[i] || cells[i % cells.length];
+      o.pos = { x: s.x, z: s.z };
+      o.collected = false;
+      o.mesh.position.set(s.x, 1.0, s.z);
+      o.mesh.visible = true;
+    });
+
+    // Reset objective state.
+    this.beacon.discovered = false;
+    this.beacon.slots.forEach((s) => {
+      s.filled = false;
+      s.mark.visible = false;
+      s.markMat.emissive.setHex(0x000000);
+    });
+    this.beaconGlow.intensity = 0;
+    this.beaconPillarMat.emissiveIntensity = 0.4;
+    this.heldCount = 0;
+    this.objectsCollected = 0;
+    this.placedCount = 0;
   }
 
   _initPlayerAndSystems() {
     this.player = new Player(this.camera, this.renderer.domElement, {
-      bounds: ARENA_HALF - 1,
+      bounds: this.maze.worldHalfW - 0.5,
     });
     this.lighting = new Lighting(this.scene);
     this.audio = new AudioManager();
@@ -202,7 +284,9 @@ export class Game {
     this.dom = {
       crosshair: $('crosshair'),
       hud: $('hud'),
-      time: $('hud-time'),
+      held: $('hud-held'),
+      placed: $('hud-placed'),
+      beacon: $('hud-beacon'),
       angels: $('hud-angels'),
       nearest: $('hud-nearest'),
       warning: $('hud-warning'),
@@ -215,6 +299,7 @@ export class Game {
       vignette: $('vignette'),
       dreadTint: $('dread-tint'),
       blink: $('blink'),
+      toast: $('toast'),
     };
   }
 
@@ -252,11 +337,14 @@ export class Game {
     this.audio.startHeartbeat();
     this.audio.startMusic();
 
-    // Spawn in the SW corner; the exit is randomized (and hidden) each run.
-    this.player.setPosition(SPAWN.x, SPAWN.z);
-    this.player.setRotation(Math.PI * 0.25, 0); // look NE-ish into the arena
+    // Randomized player spawn (valid open cell).
+    const cells = this.maze.openCellsWorld;
+    const spawn = cells[Math.floor(Math.random() * cells.length)];
+    this.player.setPosition(spawn.x, spawn.z);
+    this.player.setRotation(Math.random() * Math.PI * 2, 0);
     this._prevYaw = this.player.yaw;
-    this._placeExit();
+
+    this._placeObjectives();
 
     this._clearEnemies();
     this._clearDecoys();
@@ -304,7 +392,7 @@ export class Game {
     document.exitPointerLock?.();
   }
 
-  _victory(reason) {
+  _victory() {
     this.state = 'won';
     this.clock.stop();
     this.lighting.setMood('win');
@@ -313,9 +401,7 @@ export class Game {
     this.dom.blink.style.opacity = '0';
     this._clearScreenFilter();
     this.dom.winDetail.textContent =
-      reason === 'exit'
-        ? 'You reached the beacon. The Angels freeze, mid-reach, forever.'
-        : `You survived ${SURVIVE_SECONDS} seconds. The Angels never caught you.`;
+      'All five relics placed. The beacon roars to life and the Angels freeze forever. You escaped.';
     this._show(this.dom.win, true);
     document.exitPointerLock?.();
   }
@@ -323,36 +409,28 @@ export class Game {
   // ---- enemies & decoys ----
 
   _spawnEnemy() {
+    const cells = this.maze.openCellsWorld;
     const p = this.player.position;
-    let best = null;
-    let bestDist = -Infinity;
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const x = Math.cos(a) * (ARENA_HALF - 3);
-      const z = Math.sin(a) * (ARENA_HALF - 3);
-      const d = Math.hypot(x - p.x, z - p.z);
-      if (d > bestDist) {
-        bestDist = d;
-        best = { x, z };
-      }
-    }
-    const enemy = new Enemy(this.scene, {
-      position: new THREE.Vector3(best.x, 0, best.z),
-    });
-    this.enemies.push(enemy);
+    const far = cells.filter(
+      (c) => Math.hypot(c.x - p.x, c.z - p.z) >= ANGEL_MIN_SPAWN_DIST
+    );
+    const pool = far.length ? far : cells;
+    const spot = pool[Math.floor(Math.random() * pool.length)];
+    this.enemies.push(
+      new Enemy(this.scene, { position: new THREE.Vector3(spot.x, 0, spot.z) })
+    );
   }
 
   _spawnDecoys() {
-    // Inert statues in open spots — identical at a glance, never move.
-    const spots = [
-      [-13, 2],
-      [13, 2],
-      [-2, -8],
-      [6, -13],
-    ];
-    for (const [x, z] of spots) {
+    const cells = this.maze.openCellsWorld;
+    const p = this.player.position;
+    const pool = cells.filter((c) => Math.hypot(c.x - p.x, c.z - p.z) > 12);
+    const spots = pickSpaced(Math.random, pool.length ? pool : cells, 4, {
+      minSpacing: 12,
+    });
+    for (const s of spots) {
       this.decoys.push(
-        new Enemy(this.scene, { decoy: true, position: new THREE.Vector3(x, 0, z) })
+        new Enemy(this.scene, { decoy: true, position: new THREE.Vector3(s.x, 0, s.z) })
       );
     }
   }
@@ -378,12 +456,26 @@ export class Game {
     }
 
     this.lighting.update(dt, this.camera, this.dread);
-
-    if (this.exitGlow) {
-      this.exitGlow.intensity = 1.2 + 0.4 * Math.sin(performance.now() * 0.004);
-    }
+    this._animateObjectives();
 
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Spin/bob collectibles & pulse the beacon so they read as objectives. */
+  _animateObjectives() {
+    const tm = performance.now() * 0.001;
+    for (const o of this.objects) {
+      if (!o.mesh.visible) continue;
+      o.mesh.rotation.y = tm * 1.5;
+      o.mesh.position.y = 1.0 + Math.sin(tm * 2 + o.pos.x) * 0.18;
+    }
+    if (this.beaconRing) this.beaconRing.rotation.z = tm * 0.6;
+    if (this.beacon && this.beacon.discovered) {
+      this.beaconGlow.intensity = 1.3 + 0.5 * Math.sin(tm * 3);
+    }
+    for (const s of this.beacon?.slots ?? []) {
+      if (s.filled) s.mark.rotation.y = tm * 2;
+    }
   }
 
   _updatePlaying(dt) {
@@ -391,7 +483,8 @@ export class Game {
     while (this.enemies.length < desired) this._spawnEnemy();
 
     const interval = stepInterval(this.elapsed);
-    const stepDist = stepDistanceFor(this.elapsed);
+    // Angel speed: time-based curve + baseline bump + per-object scaling.
+    const stepDist = angelStepDistance(this.elapsed, this.objectsCollected);
 
     this.player.update(dt, (x, z) => this._collide(x, z));
 
@@ -399,7 +492,6 @@ export class Game {
     const playerPos = this.player.position;
     this.audio.updateListener(camState.position, camState.forward);
 
-    // Forced blink scheduling (drives free moves + silence + light pulse).
     this._updateBlink(dt, playerPos, stepDist);
 
     const onSnap = (enemy) => {
@@ -407,7 +499,6 @@ export class Game {
       const prox = Math.max(0, Math.min(1, 1 - d / 18));
       const p = enemy.position;
       this.audio.angelMovementSound(p.x, p.y + 1, p.z, prox);
-      // Sometimes flicker the light on a move, so you can't be sure what moved.
       if (Math.random() < 0.3) this.lighting.pulseFlicker(0.7);
     };
 
@@ -420,14 +511,13 @@ export class Game {
 
     for (let i = 0; i < this.enemies.length; i++) {
       const enemy = this.enemies[i];
-      const seen = isEnemySeen(camState, enemy.getSightPoint(), this.obstacleBoxes, {
+      const seen = isEnemySeen(camState, enemy.getSightPoint(), null, {
         fovDegrees: 80,
         maxDistance: 60,
         enemyRadius: enemy.radius,
+        occluder: this._occluder, // maze grid raycast
       });
 
-      // During a blink the whole screen is black: the free move already happened
-      // at blink start, so skip normal stepping to avoid a double move.
       if (!this.blinkActive) {
         enemy.update(dt, seen, playerPos, interval, stepDist, onSnap);
       } else {
@@ -443,14 +533,17 @@ export class Game {
       flat.z = enemy.position.z;
     }
 
-    // Dread meter from nearest UNSEEN angel; drive audio + visuals.
+    // Objectives (pickups, discovery, delivery → win).
+    this._updateObjectives(playerPos);
+    if (this.state !== 'playing') return; // beacon win may have fired
+
+    // Dread + atmosphere.
     this.dread = computeDread(this.dread, dt, nearestUnseen);
     this.audio.setDread(this.dread);
     this.audio.updateHeartbeat(nearestUnseen);
     this.audio.updateMusic();
     this._applyDreadVisuals();
 
-    // "Silence before a close unseen-angel event" cue.
     if (nearestUnseen < 4 && !this._closeCued) {
       this._closeCued = true;
       this.audio.preEventSilence(0.35);
@@ -458,34 +551,73 @@ export class Game {
       this._closeCued = false;
     }
 
-    // False audio cues when relatively safe, to keep the player uneasy.
     this.falseCueTimer -= dt;
     if (this.falseCueTimer <= 0) {
       this.falseCueTimer = 6 + Math.random() * 8;
       if (nearestUnseen > 8) this.audio.falseCue(playerPos);
     }
 
-    // Camera feel: bob/sway (amplified by dread) + motion blur on fast turns.
     this._applyCameraFeel(dt);
 
-    // Win/lose evaluation via pure rules (decoys excluded — they never catch).
+    // Lose check (proximity). Win is handled in _updateObjectives.
     this._playerFlat.x = playerPos.x;
     this._playerFlat.z = playerPos.z;
-    this._exitFlat.x = this.exitPos.x;
-    this._exitFlat.z = this.exitPos.z;
     const activeFlats = this._enemyFlats.slice(0, this.enemies.length);
-
-    const result = evaluateGameState({
-      playerPos: this._playerFlat,
-      enemyPositions: activeFlats,
-      exitPos: this._exitFlat,
-      elapsed: this.elapsed,
-    });
+    if (isCaught(this._playerFlat, activeFlats, LOSE_RADIUS)) {
+      this._gameOver('caught');
+      return;
+    }
 
     this._updateHUD(nearest, desired);
+  }
 
-    if (result.status === 'lost') this._gameOver(result.reason);
-    else if (result.status === 'won') this._victory(result.reason);
+  _updateObjectives(playerPos) {
+    // Pickups (carry-many: just increment, no limit).
+    for (const o of this.objects) {
+      if (o.collected) continue;
+      if (dist(playerPos, o.pos) < PICKUP_RADIUS) {
+        o.collected = true;
+        o.mesh.visible = false;
+        this.heldCount++;
+        this.objectsCollected++; // permanently raises angel speed
+        this.audio.pickupCue();
+        this._toast(`Relic collected — held ${this.heldCount}`);
+      }
+    }
+
+    const b = this.beacon.pos;
+    const bd = dist(playerPos, b);
+
+    // Discovery: by proximity, or by clear line of sight within range.
+    if (!this.beacon.discovered) {
+      const seen =
+        bd < DISCOVER_SIGHT && !this.maze.segmentBlocked(playerPos.x, playerPos.z, b.x, b.z);
+      if (bd < DISCOVER_RADIUS || seen) {
+        this.beacon.discovered = true;
+        this.beaconGlow.intensity = 1.4;
+        this.beaconPillarMat.emissiveIntensity = 1.3;
+        this.audio.discoverCue();
+        this._toast('Beacon discovered!');
+      }
+    }
+
+    // Delivery: drop ALL held into the next free slots (order/batch agnostic).
+    if (bd < DELIVER_RADIUS && this.heldCount > 0) {
+      while (this.heldCount > 0 && this.placedCount < NUM_OBJECTS) {
+        const slot = this.beacon.slots[this.placedCount];
+        slot.filled = true;
+        slot.mark.visible = true;
+        slot.markMat.emissive.setHex(0x33ddff);
+        this.audio.placeCue(this.placedCount);
+        this.placedCount++;
+        this.heldCount--;
+      }
+      this._toast(`Placed ${this.placedCount}/${NUM_OBJECTS}`);
+      if (this.placedCount >= NUM_OBJECTS) {
+        this.audio.beaconActivateCue();
+        this._victory();
+      }
+    }
   }
 
   _randBlinkInterval() {
@@ -506,14 +638,12 @@ export class Game {
 
     this.blinkTimer -= dt;
 
-    // Cut the atmosphere to near-silence just before the blink.
     if (!this._silenceCued && this.blinkTimer <= SILENCE_LEAD) {
       this._silenceCued = true;
       this.audio.preEventSilence(SILENCE_LEAD + 0.15);
     }
 
     if (this.blinkTimer <= 0) {
-      // Start the blink: black out, flicker, and give EVERY angel a free move.
       this.blinkActive = true;
       this.blinkElapsed = 0;
       this.blinkDuration =
@@ -535,11 +665,9 @@ export class Game {
 
   _applyDreadVisuals() {
     const v = this.dread;
-    // Tighten + darken the vignette as dread rises.
     this.dom.vignette.style.boxShadow = `inset 0 0 ${180 + v * 120}px ${
       40 + v * 140
     }px rgba(0,0,0,${(0.45 + v * 0.4).toFixed(3)})`;
-    // Reddish unease tint.
     this.dom.dreadTint.style.background = `radial-gradient(ellipse at center, transparent ${
       55 - v * 30
     }%, rgba(60,0,0,${(v * 0.35).toFixed(3)}) 100%)`;
@@ -547,18 +675,15 @@ export class Game {
   }
 
   _applyCameraFeel(dt) {
-    // Motion blur from fast camera turns.
     const dyaw = Math.abs(this.player.yaw - this._prevYaw);
     this._prevYaw = this.player.yaw;
     const turnSpeed = dt > 0 ? dyaw / dt : 0;
     const blurPx = Math.min(4, turnSpeed * 0.6);
-    // Desaturate with dread.
     const sat = (1 - this.dread * 0.55).toFixed(3);
     this.renderer.domElement.style.filter = `saturate(${sat}) blur(${blurPx.toFixed(
       2
     )}px)`;
 
-    // Subtle bob/sway, amplified by dread.
     const moving =
       this.player.keys.w ||
       this.player.keys.a ||
@@ -577,32 +702,54 @@ export class Game {
     this.camera.rotation.z = 0;
   }
 
+  /** Circle-vs-grid collision with axis separation so you slide along walls. */
   _collide(x, z) {
-    const r = 0.4;
-    for (const box of this.obstacleBoxes) {
-      if (
-        x > box.min.x - r &&
-        x < box.max.x + r &&
-        z > box.min.z - r &&
-        z < box.max.z + r
-      ) {
-        const px = x < (box.min.x + box.max.x) / 2 ? box.min.x - r : box.max.x + r;
-        const pz = z < (box.min.z + box.max.z) / 2 ? box.min.z - r : box.max.z + r;
-        if (Math.abs(x - px) < Math.abs(z - pz)) x = px;
-        else z = pz;
-      }
-    }
-    return { x, z };
+    const r = 0.45;
+    const fromX = this.player.position.x;
+    const fromZ = this.player.position.z;
+    let nx = x;
+    let nz = z;
+    if (this._circleBlocked(nx, fromZ, r)) nx = fromX;
+    if (this._circleBlocked(nx, nz, r)) nz = fromZ;
+    return { x: nx, z: nz };
+  }
+
+  _circleBlocked(x, z, r) {
+    const m = this.maze;
+    return (
+      m.isSolidWorld(x + r, z) ||
+      m.isSolidWorld(x - r, z) ||
+      m.isSolidWorld(x, z + r) ||
+      m.isSolidWorld(x, z - r) ||
+      m.isSolidWorld(x, z)
+    );
   }
 
   _updateHUD(nearest, count) {
-    const remaining = Math.max(0, Math.ceil(SURVIVE_SECONDS - this.elapsed));
-    this.dom.time.textContent = remaining;
+    this.dom.held.textContent = this.heldCount;
+    this.dom.placed.textContent = this.placedCount;
     this.dom.angels.textContent = count;
     this.dom.nearest.textContent =
       nearest === Infinity ? '—' : `${nearest.toFixed(1)}m`;
+    if (this.beacon.discovered) {
+      const bd = dist(this.player.position, this.beacon.pos);
+      this.dom.beacon.textContent = `${bd.toFixed(0)}m away`;
+    } else {
+      this.dom.beacon.textContent = 'undiscovered';
+    }
     this.dom.warning.textContent =
       nearest < LOSE_RADIUS * 2.2 ? '⚠ AN ANGEL IS CLOSE — DO NOT LOOK AWAY' : '';
+  }
+
+  /** Brief on-screen status message. */
+  _toast(msg) {
+    if (!this.dom.toast) return;
+    this.dom.toast.textContent = msg;
+    this.dom.toast.style.opacity = '1';
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => {
+      this.dom.toast.style.opacity = '0';
+    }, 1500);
   }
 
   _onResize() {
