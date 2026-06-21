@@ -174,9 +174,9 @@ export class Game {
     const group = new THREE.Group();
 
     this.beaconPillarMat = new THREE.MeshStandardMaterial({
-      color: 0x10201a,
-      emissive: 0x1b3a55,
-      emissiveIntensity: 0.4,
+      color: 0x200808,
+      emissive: 0xff2a2a, // red while undiscovered, for visibility
+      emissiveIntensity: 1.1,
       roughness: 0.6,
     });
     const pillar = new THREE.Mesh(
@@ -188,7 +188,7 @@ export class Game {
 
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.5, 0.12, 8, 32),
-      new THREE.MeshStandardMaterial({ color: 0x081018, emissive: 0x2266aa })
+      new THREE.MeshStandardMaterial({ color: 0x180808, emissive: 0xff3030 })
     );
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.25;
@@ -219,7 +219,7 @@ export class Game {
       this.beacon.slots.push({ mark, markMat, filled: false });
     }
 
-    const glow = new THREE.PointLight(0x33aaff, 0, 16, 2);
+    const glow = new THREE.PointLight(0xff3030, 1.4, 20, 2); // red beacon glow
     glow.position.set(0, 2.6, 0);
     group.add(glow);
     this.beaconGlow = glow;
@@ -259,8 +259,12 @@ export class Game {
       s.mark.visible = false;
       s.markMat.emissive.setHex(0x000000);
     });
-    this.beaconGlow.intensity = 0;
-    this.beaconPillarMat.emissiveIntensity = 0.4;
+    // Undiscovered = red & visible from afar.
+    this.beaconGlow.color.setHex(0xff3030);
+    this.beaconGlow.intensity = 1.4;
+    this.beaconPillarMat.emissive.setHex(0xff2a2a);
+    this.beaconPillarMat.emissiveIntensity = 1.1;
+    this.beaconRing.material.emissive.setHex(0xff3030);
     this.heldCount = 0;
     this.objectsCollected = 0;
     this.placedCount = 0;
@@ -470,8 +474,9 @@ export class Game {
       o.mesh.position.y = 1.0 + Math.sin(tm * 2 + o.pos.x) * 0.18;
     }
     if (this.beaconRing) this.beaconRing.rotation.z = tm * 0.6;
-    if (this.beacon && this.beacon.discovered) {
-      this.beaconGlow.intensity = 1.3 + 0.5 * Math.sin(tm * 3);
+    if (this.beacon) {
+      const base = this.beacon.discovered ? 1.6 : 1.4;
+      this.beaconGlow.intensity = base + 0.5 * Math.sin(tm * 3);
     }
     for (const s of this.beacon?.slots ?? []) {
       if (s.filled) s.mark.rotation.y = tm * 2;
@@ -594,8 +599,12 @@ export class Game {
         bd < DISCOVER_SIGHT && !this.maze.segmentBlocked(playerPos.x, playerPos.z, b.x, b.z);
       if (bd < DISCOVER_RADIUS || seen) {
         this.beacon.discovered = true;
-        this.beaconGlow.intensity = 1.4;
-        this.beaconPillarMat.emissiveIntensity = 1.3;
+        // Discovered = shift from red to cyan/blue.
+        this.beaconGlow.color.setHex(0x33aaff);
+        this.beaconGlow.intensity = 1.6;
+        this.beaconPillarMat.emissive.setHex(0x33ddff);
+        this.beaconPillarMat.emissiveIntensity = 1.4;
+        this.beaconRing.material.emissive.setHex(0x33aaff);
         this.audio.discoverCue();
         this._toast('Beacon discovered!');
       }
