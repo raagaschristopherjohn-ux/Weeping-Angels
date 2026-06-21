@@ -628,6 +628,10 @@ export class Game {
         enemy.seen = false;
       }
 
+      // The beacon safe zone is impassable: keep angels at/outside its boundary
+      // (they can never step or blink inside it).
+      this._clampOutOfSafeZone(enemy);
+
       const d = enemy.distanceTo(playerPos);
       if (d < nearest) nearest = d;
       if (!enemy.seen && d < nearestUnseen) nearestUnseen = d;
@@ -750,6 +754,21 @@ export class Game {
         this.audio.beaconActivateCue();
         this._victory();
       }
+    }
+  }
+
+  /** Push an angel back to the safe-zone boundary if it's inside it. */
+  _clampOutOfSafeZone(enemy) {
+    const b = this.beacon.pos;
+    const dx = enemy.position.x - b.x;
+    const dz = enemy.position.z - b.z;
+    const d = Math.hypot(dx, dz);
+    if (d >= BEACON_SAFE_RADIUS) return;
+    if (d < 1e-4) {
+      enemy.group.position.set(b.x + BEACON_SAFE_RADIUS, 0, b.z);
+    } else {
+      const s = BEACON_SAFE_RADIUS / d;
+      enemy.group.position.set(b.x + dx * s, 0, b.z + dz * s);
     }
   }
 
