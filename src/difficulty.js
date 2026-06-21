@@ -13,6 +13,10 @@
  *                   speedMultiplier(t) = 1 + 0.05 * floor(t / 15)
  *   - Step interval shrinks as speed grows (faster cadence), floored at 0.4s
  *                   to keep motion legible when re-observed.
+ *   - Step distance: a tuned BASE_STEP_DISTANCE that grows with speedMultiplier,
+ *                   so "+5% every 15s" applies to how far each snap carries the
+ *                   angel. The base is large enough that one missed glance is
+ *                   genuinely costly.
  */
 
 export const MAX_ENEMIES = 6;
@@ -20,6 +24,7 @@ export const BASE_ENEMIES = 1;
 export const ENEMY_INTERVAL_SECONDS = 20; // add an enemy this often
 export const SPEED_INTERVAL_SECONDS = 15; // bump speed this often
 export const SPEED_STEP = 0.05; // +5% per bump
+export const BASE_STEP_DISTANCE = 1.7; // metres an angel snaps per step at t=0
 
 /**
  * Number of Angels that should be active at elapsed time `t`.
@@ -56,4 +61,15 @@ export function speedMultiplier(t) {
 export function stepInterval(t, baseInterval = 0.8, floor = 0.4) {
   const mult = speedMultiplier(t);
   return Math.max(floor, baseInterval / mult);
+}
+
+/**
+ * How far (metres) an angel snaps in a single step at time `t`. Grows with the
+ * speed multiplier so a missed glance later in the run costs more ground.
+ * @param {number} t elapsed seconds
+ * @param {number} [base=BASE_STEP_DISTANCE]
+ * @returns {number}
+ */
+export function stepDistanceFor(t, base = BASE_STEP_DISTANCE) {
+  return base * speedMultiplier(t);
 }

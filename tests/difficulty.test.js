@@ -3,8 +3,10 @@ import {
   activeEnemies,
   speedMultiplier,
   stepInterval,
+  stepDistanceFor,
   MAX_ENEMIES,
   BASE_ENEMIES,
+  BASE_STEP_DISTANCE,
 } from '../src/difficulty.js';
 import {
   isCaught,
@@ -65,6 +67,21 @@ describe('stepInterval', () => {
     expect(stepInterval(0)).toBeCloseTo(0.8, 5);
     expect(stepInterval(15)).toBeCloseTo(0.8 / 1.05, 5);
     expect(stepInterval(100000, 0.8, 0.4)).toBe(0.4); // floored
+  });
+});
+
+describe('stepDistanceFor (+5% snap distance every 15s)', () => {
+  it('equals the base at t=0', () => {
+    expect(stepDistanceFor(0)).toBeCloseTo(BASE_STEP_DISTANCE, 5);
+  });
+
+  it('grows with the speed multiplier', () => {
+    expect(stepDistanceFor(15)).toBeCloseTo(BASE_STEP_DISTANCE * 1.05, 5);
+    expect(stepDistanceFor(30)).toBeCloseTo(BASE_STEP_DISTANCE * 1.1, 5);
+  });
+
+  it('respects a custom base', () => {
+    expect(stepDistanceFor(0, 2)).toBeCloseTo(2, 5);
   });
 });
 
