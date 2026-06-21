@@ -1,7 +1,12 @@
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+// `base: './'` for the production build emits relative asset URLs, so the app
+// works when served from a GitHub Pages project subpath
+// (e.g. https://user.github.io/Weeping-Angels/) without hardcoding the repo
+// name. Dev server stays at root ('/').
+export default defineConfig(({ command }) => ({
   root: '.',
+  base: command === 'build' ? './' : '/',
   server: {
     port: 5173,
     open: false,
@@ -10,4 +15,4 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.js'],
   },
-});
+}));
