@@ -1,8 +1,10 @@
 /**
  * lighting.js
  * ------------
- * Dim ambient base plus a flickering point light that follows the player, like
- * a failing lantern. The flicker is driven from the game loop via update(dt).
+ * Low ambient + a narrow flashlight-style spotlight bound to the camera, so the
+ * periphery is genuinely dark and the player can only ever light what they look
+ * at directly. A short flicker can be pulsed on the exact frames angels are
+ * allowed to move, so the player can't tell movement from a failing bulb.
  */
 import * as THREE from 'three';
 
@@ -11,60 +13,92 @@ export class Lighting {
    * @param {THREE.Scene} scene
    */
   constructor(scene) {
-    // Global fill so you can always make out the room and where you're walking.
-    this.ambient = new THREE.AmbientLight(0x6678a0, 0.95);
+    this.scene = scene;
+
+    // Just enough ambient to not be pitch black, but the periphery stays dark.
+    this.ambient = new THREE.AmbientLight(0x2a3550, 0.32);
     scene.add(this.ambient);
 
-    // A cool directional light for shape definition and floor visibility.
-    this.moon = new THREE.DirectionalLight(0x8fa3c8, 0.6);
+    // Faint cold fill for shape definition.
+    this.moon = new THREE.DirectionalLight(0x4a587a, 0.18);
     this.moon.position.set(-1, 3, 2);
     scene.add(this.moon);
 
-    // The player's flickering lantern (wide reach so nearby threats are visible).
-    this.lantern = new THREE.PointLight(0xffe8c0, 4.0, 45, 2);
-    this.lantern.position.set(0, 2.2, 0);
-    scene.add(this.lantern);
+    // Flashlight: a tight spotlight that tracks the camera's aim.
+    this.flashlight = new THREE.SpotLight(0xfff0d8, 6.0, 38, 0.5, 0.45, 1.2);
+    this.flashlight.position.set(0, 1.7, 0);
+    this.flashTarget = new THREE.Object3D();
+    scene.add(this.flashTarget);
+    this.flashlight.target = this.flashTarget;
+    scene.add(this.flashlight);
 
-    this._baseIntensity = 4.0;
+    // A small warm point light at the player so their immediate feet/body read.
+    this.glowPad = new THREE.PointLight(0xffe6c0, 0.8, 6, 2);
+    scene.add(this.glowPad);
+
+    this._baseIntensity = 6.0;
     this._t = 0;
-    // Pre-seeded noise phases so the flicker isn't a clean sine.
     this._phases = [1.7, 4.2, 9.1];
+    this._pulse = 0; // transient flicker injection (0..1), decays each frame
+
+    this._fwd = new THREE.Vector3();
   }
 
   /**
-   * @param {number} dt seconds since last frame
-   * @param {THREE.Vector3} playerPos
+   * @param {number} dt seconds
+   * @param {THREE.Camera} camera
+   * @param {number} [dread=0] 0..1 — deepens the flicker when dread is high
    */
-  update(dt, playerPos) {
+  update(dt, camera, dread = 0) {
     this._t += dt;
 
-    // Layered sines + occasional dips => candle-like flicker. Kept shallow so
-    // the scene never goes dark enough to lose track of where you are.
+    // Base candle-like flicker, deepened by dread.
     const a = Math.sin(this._t * 11 + this._phases[0]);
     const b = Math.sin(this._t * 23 + this._phases[1]);
     const c = Math.sin(this._t * 37 + this._phases[2]);
-    let flicker = 1 + 0.06 * a + 0.03 * b + 0.02 * c;
+    const depth = 0.05 + dread * 0.12;
+    let flicker = 1 + depth * a + depth * 0.5 * b + depth * 0.3 * c;
 
-    // Rare, mild dip for a heart-skip moment (no longer a near-blackout).
-    if (Math.random() < 0.01) flicker *= 0.8;
+    // Transient pulse (synced to angel-move moments) drops the light sharply.
+    if (this._pulse > 0) {
+      flicker *= 1 - 0.55 * this._pulse;
+      this._pulse = Math.max(0, this._pulse - dt * 6);
+    }
 
-    this.lantern.intensity = this._baseIntensity * flicker;
+    this.flashlight.intensity = this._baseIntensity * flicker;
+    this.glowPad.intensity = 0.8 * flicker;
 
-    // Keep the lantern just above and at the player.
-    this.lantern.position.set(playerPos.x, 2.2, playerPos.z);
+    // Track the camera.
+    if (camera) {
+      const p = camera.position;
+      this.flashlight.position.set(p.x, p.y, p.z);
+      this.glowPad.position.set(p.x, p.y - 0.2, p.z);
+      camera.getWorldDirection(this._fwd);
+      this.flashTarget.position.set(
+        p.x + this._fwd.x * 10,
+        p.y + this._fwd.y * 10,
+        p.z + this._fwd.z * 10
+      );
+    }
   }
 
-  /** Briefly surge the light (used on win) or kill it (used on lose). */
+  /** Inject a sharp flicker (used the instant angels are allowed to move). */
+  pulseFlicker(strength = 1) {
+    this._pulse = Math.min(1, this._pulse + strength);
+  }
+
   setMood(mood) {
     if (mood === 'lose') {
-      this.lantern.color.set(0xff4040);
-      this._baseIntensity = 2.0;
+      this.flashlight.color.set(0xff5050);
+      this._baseIntensity = 3.0;
     } else if (mood === 'win') {
-      this.lantern.color.set(0xb0ffd8);
-      this._baseIntensity = 5.0;
+      this.flashlight.color.set(0xc0ffe0);
+      this._baseIntensity = 8.0;
+      this.ambient.intensity = 0.6;
     } else {
-      this.lantern.color.set(0xffe8c0);
-      this._baseIntensity = 4.0;
+      this.flashlight.color.set(0xfff0d8);
+      this._baseIntensity = 6.0;
+      this.ambient.intensity = 0.32;
     }
   }
 }
