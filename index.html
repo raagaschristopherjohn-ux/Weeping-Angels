@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weeping Angels — Don't Look Away</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+      #app { position: relative; width: 100vw; height: 100vh; }
+      canvas { display: block; }
+
+      /* Crosshair */
+      #crosshair {
+        position: absolute; top: 50%; left: 50%;
+        width: 6px; height: 6px; margin: -3px 0 0 -3px;
+        border-radius: 50%; background: rgba(255, 255, 255, 0.7);
+        pointer-events: none; z-index: 5;
+      }
+
+      /* HUD */
+      #hud {
+        position: absolute; top: 16px; left: 16px;
+        color: #cdd6f4; font-size: 16px; line-height: 1.6;
+        text-shadow: 0 0 6px #000; pointer-events: none; z-index: 5;
+      }
+      #hud .label { color: #a6adc8; }
+      #hud .danger { color: #f38ba8; }
+
+      /* Vignette to sell the dread */
+      #vignette {
+        position: absolute; inset: 0; pointer-events: none; z-index: 4;
+        box-shadow: inset 0 0 220px 80px rgba(0, 0, 0, 0.9);
+      }
+
+      /* Overlays */
+      .overlay {
+        position: absolute; inset: 0; z-index: 10;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; color: #cdd6f4; background: rgba(0, 0, 0, 0.82);
+        gap: 18px; padding: 24px; cursor: pointer;
+      }
+      .overlay h1 { font-size: 44px; letter-spacing: 2px; }
+      .overlay h1.lose { color: #f38ba8; }
+      .overlay h1.win { color: #a6e3a1; }
+      .overlay p { font-size: 17px; color: #bac2de; max-width: 560px; line-height: 1.6; }
+      .overlay .hint { font-size: 15px; color: #89b4fa; margin-top: 8px; }
+      .overlay.hidden { display: none; }
+      .overlay ul { text-align: left; color: #bac2de; font-size: 15px; line-height: 1.8; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="crosshair" class="hidden"></div>
+      <div id="vignette"></div>
+
+      <div id="hud" class="hidden">
+        <div><span class="label">TIME LEFT:</span> <span id="hud-time">90</span>s</div>
+        <div><span class="label">ANGELS:</span> <span id="hud-angels">0</span></div>
+        <div><span class="label">NEAREST:</span> <span id="hud-nearest">—</span></div>
+        <div id="hud-warning" class="danger"></div>
+      </div>
+
+      <!-- Start screen -->
+      <div id="overlay-start" class="overlay">
+        <h1>WEEPING ANGELS</h1>
+        <p>
+          They only move when you can't see them. The instant you look away, they
+          step closer. Don't blink. Don't turn your back. Survive 90 seconds — or
+          reach the green exit beacon.
+        </p>
+        <ul>
+          <li><b>WASD</b> — move</li>
+          <li><b>Mouse</b> — look</li>
+          <li><b>Esc</b> — release cursor (pauses)</li>
+        </ul>
+        <p class="hint">Click anywhere to lock the cursor and begin.</p>
+      </div>
+
+      <!-- Pause / pointer-lock-lost screen -->
+      <div id="overlay-pause" class="overlay hidden">
+        <h1>PAUSED</h1>
+        <p>The cursor is free. The Angels wait, patient and still.</p>
+        <p class="hint">Click anywhere to resume.</p>
+      </div>
+
+      <!-- Game over -->
+      <div id="overlay-lose" class="overlay hidden">
+        <h1 class="lose">GAME OVER</h1>
+        <p id="lose-detail">An Angel reached you.</p>
+        <p class="hint">Click to try again.</p>
+      </div>
+
+      <!-- Win -->
+      <div id="overlay-win" class="overlay hidden">
+        <h1 class="win">YOU ESCAPED</h1>
+        <p id="win-detail">You survived.</p>
+        <p class="hint">Click to play again.</p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
