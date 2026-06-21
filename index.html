@@ -46,6 +46,12 @@
         position: absolute; inset: 0; pointer-events: none; z-index: 6;
         background: #000; opacity: 0;
       }
+      /* Jumpscare red flash (kept translucent so the face shows through) */
+      #flash {
+        position: absolute; inset: 0; pointer-events: none; z-index: 7;
+        background: radial-gradient(ellipse at center, rgba(150,0,0,0.15), rgba(80,0,0,0.55));
+        opacity: 0;
+      }
       #dread-tint {
         position: absolute; inset: 0; pointer-events: none; z-index: 4;
         background: radial-gradient(ellipse at center, transparent 40%, rgba(40,0,0,0.0) 100%);
@@ -81,6 +87,7 @@
       <div id="vignette"></div>
       <div id="dread-tint"></div>
       <div id="blink"></div>
+      <div id="flash"></div>
 
       <div id="hud" class="hidden">
         <div><span class="label">HELD:</span> <span id="hud-held">0</span></div>

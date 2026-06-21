@@ -619,6 +619,54 @@ export class AudioManager {
     [392, 494, 587, 784].forEach((f) => this._note(f, 0, 1.2, 'sine', 0.2));
   }
 
+  /** Loud, harsh jumpscare: noise screech + dissonant scream + sub-boom impact. */
+  jumpscare() {
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+
+    // Screech: sweeping bandpass noise.
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this._noiseBuffer;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 4;
+    bp.frequency.setValueAtTime(700, t);
+    bp.frequency.exponentialRampToValueAtTime(3200, t + 0.5);
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime(0.7, t);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    noise.connect(bp).connect(ng).connect(this.master);
+    noise.start(t);
+    noise.stop(t + 0.95);
+
+    // Dissonant scream cluster (detuned saws, swooping down).
+    [660, 699, 990, 1397].forEach((f) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f * 1.5, t);
+      o.frequency.exponentialRampToValueAtTime(f * 0.55, t + 0.8);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+      o.connect(g).connect(this.master);
+      o.start(t);
+      o.stop(t + 0.85);
+    });
+
+    // Sub-boom impact.
+    const sub = this.ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(85, t);
+    sub.frequency.exponentialRampToValueAtTime(28, t + 0.7);
+    const sg = this.ctx.createGain();
+    sg.gain.setValueAtTime(0.8, t);
+    sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+    sub.connect(sg).connect(this.master);
+    sub.start(t);
+    sub.stop(t + 0.85);
+  }
+
   // ---- stingers ----
 
   loseStinger() {

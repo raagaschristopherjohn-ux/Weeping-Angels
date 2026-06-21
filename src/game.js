@@ -17,7 +17,7 @@ import { activeEnemies, stepInterval, angelStepDistance } from './difficulty.js'
 import { computeDread } from './dread.js';
 import { generateMaze } from './maze.js';
 import { pickSpaced, pickFar, dist } from './placement.js';
-import { isCaught, LOSE_RADIUS } from './gameRules.js';
+import { LOSE_RADIUS } from './gameRules.js';
 
 // Maze + world.
 const MAZE_COLS = 10;
@@ -73,6 +73,14 @@ export class Game {
     this.falseCueTimer = 0;
     this._prevYaw = 0;
     this._bobT = 0;
+
+    // Jumpscare state.
+    this.jumpscareEnemy = null;
+    this.jumpscareElapsed = 0;
+    this.jumpscareDuration = 1.3;
+    this._jsDir = { x: 0, z: 1 };
+    this._jsAnchor = { x: 0, y: 1.7, z: 0 };
+    this._jsLook = new THREE.Vector3();
 
     // Occluder closure for visibility (grid raycast — scales to the big maze).
     this._occluder = (o, p) => this.maze.segmentBlocked(o.x, o.z, p.x, p.z);
@@ -303,6 +311,7 @@ export class Game {
       vignette: $('vignette'),
       dreadTint: $('dread-tint'),
       blink: $('blink'),
+      flash: $('flash'),
       toast: $('toast'),
     };
   }
@@ -335,6 +344,7 @@ export class Game {
     this._show(this.dom.hud, true);
     this._show(this.dom.crosshair, true);
     this.dom.blink.style.opacity = '0';
+    this.dom.flash.style.opacity = '0';
 
     this.lighting.setMood('neutral');
     this.audio.startAmbient();
@@ -378,6 +388,67 @@ export class Game {
     this.clock.start();
     this.audio.resume();
     this._show(this.dom.pause, false);
+  }
+
+  /** Snap to face the catching angel and lunge its face at the camera. */
+  _triggerJumpscare(enemy) {
+    this.state = 'jumpscare';
+    this.jumpscareEnemy = enemy;
+    this.jumpscareElapsed = 0;
+    document.exitPointerLock?.();
+    this._show(this.dom.crosshair, false);
+
+    this.audio.stopAmbient();
+    this.audio.jumpscare();
+    this.lighting.setMood('lose'); // red flashlight onto the face
+
+    // Horizontal direction from the camera to the angel — we look down it.
+    const c = this.camera.position;
+    let dx = enemy.position.x - c.x;
+    let dz = enemy.position.z - c.z;
+    const len = Math.hypot(dx, dz) || 1;
+    this._jsDir = { x: dx / len, z: dz / len };
+    this._jsAnchor = { x: c.x, y: this.player.eyeHeight, z: c.z };
+
+    enemy.group.scale.set(1.5, 1.5, 1.5); // loom larger
+    if (enemy.eyeMaterial) {
+      enemy.eyeMaterial.emissive.setHex(0xff0000);
+      enemy.eyeMaterial.emissiveIntensity = 3.2;
+    }
+  }
+
+  _updateJumpscare(dt) {
+    this.jumpscareElapsed += dt;
+    const k = Math.min(1, this.jumpscareElapsed / this.jumpscareDuration);
+    const e = this.jumpscareEnemy;
+    const a = this._jsAnchor;
+
+    // Lunge the face from ~2.4m to ~0.7m.
+    const d = 2.4 + (0.7 - 2.4) * k;
+    e.group.position.set(a.x + this._jsDir.x * d, 0, a.z + this._jsDir.z * d);
+    e.group.rotation.y = Math.atan2(-this._jsDir.x, -this._jsDir.z); // face camera
+
+    // Camera at the anchor with a violent shake, staring at the face.
+    const sh = 0.06 * (1 - k * 0.3);
+    this.camera.position.set(
+      a.x + (Math.random() - 0.5) * sh,
+      a.y + (Math.random() - 0.5) * sh,
+      a.z + (Math.random() - 0.5) * sh
+    );
+    this._jsLook.set(e.group.position.x, 1.62, e.group.position.z);
+    this.camera.lookAt(this._jsLook);
+    this.camera.rotation.z = (Math.random() - 0.5) * 0.07; // roll shake
+
+    // Strobing red flash (translucent so the looming face stays visible).
+    this.dom.flash.style.opacity = String(
+      0.25 + 0.3 * Math.abs(Math.sin(this.jumpscareElapsed * 32))
+    );
+
+    if (this.jumpscareElapsed >= this.jumpscareDuration) {
+      this.dom.flash.style.opacity = '0';
+      e.group.scale.set(1, 1, 1);
+      this._gameOver('caught');
+    }
   }
 
   _gameOver(reason) {
@@ -427,7 +498,7 @@ export class Game {
       new Enemy(this.scene, {
         position: new THREE.Vector3(spot.x, 0, spot.z),
         canPhaseUnseen: isPhaser,
-        speedFactor: isPhaser ? 0.98 : 1,
+        speedFactor: isPhaser ? 0.9506 : 1, // 0.98 - 3% of current
       })
     );
   }
@@ -464,6 +535,8 @@ export class Game {
     if (this.state === 'playing') {
       this.elapsed += dt;
       this._updatePlaying(dt);
+    } else if (this.state === 'jumpscare') {
+      this._updateJumpscare(dt);
     }
 
     this.lighting.update(dt, this.camera, this.dread);
@@ -571,12 +644,18 @@ export class Game {
 
     this._applyCameraFeel(dt);
 
-    // Lose check (proximity). Win is handled in _updateObjectives.
-    this._playerFlat.x = playerPos.x;
-    this._playerFlat.z = playerPos.z;
-    const activeFlats = this._enemyFlats.slice(0, this.enemies.length);
-    if (isCaught(this._playerFlat, activeFlats, LOSE_RADIUS)) {
-      this._gameOver('caught');
+    // Lose check (proximity) — find the catching angel for the jumpscare.
+    let caught = null;
+    let caughtDist = Infinity;
+    for (const enemy of this.enemies) {
+      const d = enemy.distanceTo(playerPos);
+      if (d <= LOSE_RADIUS && d < caughtDist) {
+        caughtDist = d;
+        caught = enemy;
+      }
+    }
+    if (caught) {
+      this._triggerJumpscare(caught);
       return;
     }
 
@@ -715,6 +794,7 @@ export class Game {
   _clearScreenFilter() {
     this.renderer.domElement.style.filter = 'none';
     this.dom.dreadTint.style.opacity = '0';
+    this.dom.flash.style.opacity = '0';
     this.camera.rotation.z = 0;
   }
 

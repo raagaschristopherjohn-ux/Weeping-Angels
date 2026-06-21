@@ -50,6 +50,47 @@ export function buildAngelMesh(poseSeed = 0.5) {
   head.position.set(0, 1.62, 0.42);
   group.add(head);
 
+  // --- Creepy face (front of the head faces +Z) ---
+  // Hollow sunken eye sockets (dark) with glowing pupils inside them.
+  const socketMat = new THREE.MeshStandardMaterial({
+    color: 0x050505,
+    roughness: 1,
+    emissive: 0x000000,
+  });
+  const eyeMaterial = new THREE.MeshStandardMaterial({
+    color: 0x000000,
+    emissive: 0xff1414,
+    emissiveIntensity: 1.8, // glowing red eyes
+    roughness: 0.3,
+  });
+  const socketGeo = new THREE.SphereGeometry(0.085, 8, 8);
+  const pupilGeo = new THREE.SphereGeometry(0.045, 8, 8);
+  for (const sx of [-0.095, 0.095]) {
+    const socket = new THREE.Mesh(socketGeo, socketMat);
+    socket.position.set(sx, 1.66, 0.58);
+    socket.scale.set(1, 1.25, 0.7); // gaunt vertical sockets
+    group.add(socket);
+    const pupil = new THREE.Mesh(pupilGeo, eyeMaterial);
+    pupil.position.set(sx, 1.66, 0.63);
+    group.add(pupil);
+  }
+  // Gaping, screaming mouth — a dark vertical maw.
+  const mouthMat = new THREE.MeshStandardMaterial({
+    color: 0x040000,
+    emissive: 0x2a0000,
+    emissiveIntensity: 0.9,
+    roughness: 0.8,
+  });
+  const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), mouthMat);
+  mouth.scale.set(0.7, 1.5, 0.5);
+  mouth.position.set(0, 1.46, 0.6);
+  group.add(mouth);
+  // Brow ridge — a thin dark bar that gives a furrowed, angry look.
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.06), socketMat);
+  brow.position.set(0, 1.74, 0.6);
+  brow.rotation.z = 0;
+  group.add(brow);
+
   // Shoulders.
   const shoulders = new THREE.Mesh(
     new THREE.SphereGeometry(0.34, 10, 8),
@@ -85,7 +126,7 @@ export function buildAngelMesh(poseSeed = 0.5) {
   mkArm(-1, 0.18 + poseSeed * 0.1, 0.35 + poseSeed * 0.2);
   mkArm(1, -0.05, 0.1);
 
-  return { group, material };
+  return { group, material, eyeMaterial };
 }
 
 export class Enemy {
@@ -121,6 +162,7 @@ export class Enemy {
     const built = buildAngelMesh(poseSeed);
     this.group = built.group;
     this.material = built.material;
+    this.eyeMaterial = built.eyeMaterial;
     if (opts.position) this.group.position.copy(opts.position);
     // Random facing for decoys/spawns so they don't all point the same way.
     this.group.rotation.y = Math.random() * Math.PI * 2;

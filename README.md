@@ -120,8 +120,16 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
 - **Seen-first:** a normal angel may only move *after the player has seen it at
   least once*. Until then it stays frozen, even during a forced blink.
 - **Two phasing exceptions:** the first two angels may move while unseen even
-  before they're ever seen (they hunt your live position) — but pay a **2% speed
-  penalty** for the privilege.
+  before they're ever seen (they hunt your live position) — but pay a speed
+  penalty (`speedFactor ≈ 0.95`) for the privilege.
+
+### Death jumpscare (`src/game.js`, `src/enemy.js`, `src/audioManager.js`)
+
+When an angel reaches you, the camera **snaps to face it**, the angel's face
+**lunges into view** (scaled up, eyes blazing) with a strobing red flash and a
+loud procedural **screech** (`audio.jumpscare()`), then the Game Over screen
+appears. The angels have **creepy faces** — glowing red eyes set in dark sunken
+sockets, a gaping maw, and a furrowed brow.
 - **Step cadence:** `stepInterval(t) = max(0.4, 0.8 / speedMultiplier(t))`
   → steps quicken over time but never below 0.4s, so motion stays legible.
 
