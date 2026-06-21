@@ -145,7 +145,7 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
 
 ### Win / Lose (`src/game.js`, `src/gameRules.js`)
 
-- **Lose:** any Angel comes within `LOSE_RADIUS` (1.6m) of the player → *Game Over*.
+- **Lose:** any Angel comes within `LOSE_RADIUS` (0.8m) of the player → *Game Over*.
 - **Win:** place all **5 relics** in the beacon → it activates → *You Escaped*.
   (This replaces the old survive-timer / fixed-exit win.)
 
