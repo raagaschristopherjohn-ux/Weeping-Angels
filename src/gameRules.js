@@ -10,7 +10,7 @@
  */
 
 export const SURVIVE_SECONDS = 90;
-export const LOSE_RADIUS = 1.6; // metres; an Angel this close gets you
+export const LOSE_RADIUS = 0.8; // metres; an Angel this close gets you
 export const EXIT_RADIUS = 2.2; // metres; stand this close to the beacon to escape
 
 function dist2D(a, b) {
