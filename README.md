@@ -46,8 +46,9 @@ npm test          # one-shot (vitest run)
 npm run test:watch
 ```
 
-Current status: **50 tests passing** across `tests/visibility.test.js`,
-`tests/difficulty.test.js`, and `tests/dread.test.js`.
+Current status: **63 tests passing** across `tests/visibility.test.js`,
+`tests/difficulty.test.js`, `tests/dread.test.js`, and
+`tests/exitPlacement.test.js`.
 
 ---
 
@@ -121,10 +122,12 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
   **and** unseen (within 14 m), decays when safe, clamped to [0, 1]. Drives a
   tightening/darkening vignette, desaturation, camera sway, and the audio dread
   layers.
-- **Level design:** a central wall blocks the spawn→exit diagonal so the **exit
-  is never visible from spawn**; staggered walls create pockets so you can't keep
-  multiple Angels in view from one spot (line-of-sight contention is the main
-  difficulty).
+- **Level design:** staggered walls create pockets so you can't keep multiple
+  Angels in view from one spot (line-of-sight contention is the main difficulty).
+- **Randomized exit** (`src/exitPlacement.js`, pure + tested): the green beacon is
+  placed in a fresh spot **every run / page load** — far from spawn, clear of
+  walls, and hidden from the spawn point by an obstacle (rejection sampling), so
+  finding it always means turning away from danger.
 
 ### Win / Lose (`src/gameRules.js`)
 
@@ -151,6 +154,9 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
    BPM rising from ~48 to ~140 as the nearest unseen Angel closes in.
 7. **False cues** — occasional faint grind from a random direction with no real
    Angel behind it.
+8. **Background music** — a slow, looping, minor-key score: a soft triangle
+   arpeggio over a shifting sub-bass through a 4-bar progression (Am–F–C–Em),
+   sequenced against `AudioContext.currentTime`. Also procedural — no files.
 
 The `AudioContext` is created on first click to satisfy browser autoplay policy.
 
@@ -189,6 +195,7 @@ src/
   visibility.js    pure "is this enemy seen?" (FOV + occlusion)
   difficulty.js    pure scaling curves
   dread.js         pure dread-meter logic
+  exitPlacement.js pure random-exit placement (valid + hidden)
   gameRules.js     pure win/lose evaluation
   audioManager.js  procedural Web Audio (ambient, dread, spatial, heartbeat…)
   lighting.js      low ambient + camera-bound flashlight
@@ -196,6 +203,7 @@ tests/
   visibility.test.js
   difficulty.test.js   (also covers gameRules win/lose logic)
   dread.test.js
+  exitPlacement.test.js
 README.md
 ```
 
@@ -203,7 +211,7 @@ README.md
 
 ## Verification performed
 
-- `npm test` → **50/50 passing**.
+- `npm test` → **63/63 passing**.
 - `npm run build` → clean production bundle.
 - Headless **Playwright** end-to-end (`--use-gl=swiftshader`): page loads, the
   How-to-Play start screen shows, clicking starts the game and the HUD goes live,

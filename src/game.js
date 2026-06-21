@@ -14,9 +14,11 @@ import { AudioManager } from './audioManager.js';
 import { isEnemySeen } from './visibility.js';
 import { activeEnemies, stepInterval, stepDistanceFor } from './difficulty.js';
 import { computeDread } from './dread.js';
+import { pickExitSpot } from './exitPlacement.js';
 import { evaluateGameState, SURVIVE_SECONDS, LOSE_RADIUS } from './gameRules.js';
 
 const ARENA_HALF = 24;
+const SPAWN = { x: -(ARENA_HALF - 3), z: -(ARENA_HALF - 3) };
 
 // Forced-blink tuning.
 const BLINK_MIN = 4; // seconds
@@ -146,7 +148,7 @@ export class Game {
   }
 
   _addExit() {
-    // Tucked in the NE corner, behind the screen wall — hidden from spawn.
+    // Position is randomized per run in _placeExit(); start at a placeholder.
     this.exitPos = new THREE.Vector3(ARENA_HALF - 3, 0, ARENA_HALF - 3);
     const mat = new THREE.MeshStandardMaterial({
       color: 0x10301a,
@@ -163,6 +165,21 @@ export class Game {
     glow.position.set(this.exitPos.x, 2.5, this.exitPos.z);
     this.scene.add(glow);
     this.exitGlow = glow;
+  }
+
+  /**
+   * Randomly place the exit: a fresh, valid spot every run (and every page
+   * load), far from spawn, clear of walls, and hidden from the spawn point.
+   */
+  _placeExit() {
+    const spot = pickExitSpot(Math.random, SPAWN, this.obstacleBoxes, {
+      bounds: ARENA_HALF - 2,
+      minDistFromSpawn: 26,
+      clearance: 1.8,
+    });
+    this.exitPos.set(spot.x, 0, spot.z);
+    this.exitBeacon.position.set(spot.x, 2, spot.z);
+    this.exitGlow.position.set(spot.x, 2.5, spot.z);
   }
 
   _initPlayerAndSystems() {
@@ -231,11 +248,13 @@ export class Game {
     this.lighting.setMood('neutral');
     this.audio.startAmbient();
     this.audio.startHeartbeat();
+    this.audio.startMusic();
 
-    // Spawn in the SW corner; exit is in the (hidden) NE corner.
-    this.player.setPosition(-(ARENA_HALF - 3), -(ARENA_HALF - 3));
+    // Spawn in the SW corner; the exit is randomized (and hidden) each run.
+    this.player.setPosition(SPAWN.x, SPAWN.z);
     this.player.setRotation(Math.PI * 0.25, 0); // look NE-ish into the arena
     this._prevYaw = this.player.yaw;
+    this._placeExit();
 
     this._clearEnemies();
     this._clearDecoys();
@@ -426,6 +445,7 @@ export class Game {
     this.dread = computeDread(this.dread, dt, nearestUnseen);
     this.audio.setDread(this.dread);
     this.audio.updateHeartbeat(nearestUnseen);
+    this.audio.updateMusic();
     this._applyDreadVisuals();
 
     // "Silence before a close unseen-angel event" cue.

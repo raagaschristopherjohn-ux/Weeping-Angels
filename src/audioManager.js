@@ -33,6 +33,13 @@ export class AudioManager {
     this.heartGain = null;
     this._heartNext = 0;
     this._heartRunning = false;
+
+    // Background music sequencer state.
+    this.musicGain = null;
+    this._musicRunning = false;
+    this._musicNext = 0;
+    this._musicStep = 0;
+    this._musicStepDur = 0.5; // seconds per arpeggio step (~120 BPM eighths)
   }
 
   init() {
@@ -171,6 +178,7 @@ export class AudioManager {
     }
     this._heartRunning = false;
     if (this.heartGain) this.heartGain.gain.value = 0;
+    this.stopMusic();
   }
 
   /** (2) Crossfade the dread layers up/down with the dread meter (0..1). */
@@ -367,6 +375,105 @@ export class AudioManager {
     osc.connect(g).connect(this.heartGain);
     osc.start(time);
     osc.stop(time + 0.18);
+  }
+
+  // ---- background music ----
+
+  /**
+   * Start a slow, looping, minor-key procedural score: a soft arpeggio over a
+   * shifting low bass through a 4-bar progression (Am – F – C – Em). Scheduled
+   * against ctx.currentTime so it stays in time and pauses cleanly with the
+   * AudioContext. Routed through atmosBus so the silence cue ducks it too.
+   */
+  startMusic() {
+    if (!this.enabled || this._musicRunning) return;
+    const t = this.ctx.currentTime;
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.setValueAtTime(0, t);
+    this.musicGain.gain.linearRampToValueAtTime(0.14, t + 4); // gentle fade-in
+    this.musicGain.connect(this.atmosBus);
+    this._musicRunning = true;
+    this._musicNext = t + 0.2;
+    this._musicStep = 0;
+  }
+
+  stopMusic() {
+    if (!this.musicGain) return;
+    const t = this.ctx.currentTime;
+    this.musicGain.gain.cancelScheduledValues(t);
+    this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, t);
+    this.musicGain.gain.linearRampToValueAtTime(0, t + 0.6);
+    this._musicRunning = false;
+    const g = this.musicGain;
+    this.musicGain = null;
+    setTimeout(() => g.disconnect(), 800);
+  }
+
+  /** Drive the music sequencer. Call every frame while playing. */
+  updateMusic() {
+    if (!this.enabled || !this._musicRunning || !this.musicGain) return;
+    const t = this.ctx.currentTime;
+    if (this._musicNext < t) this._musicNext = t + 0.05; // resync after a pause
+    const lookahead = 0.6;
+    while (this._musicNext < t + lookahead) {
+      this._playMusicStep(this._musicNext, this._musicStep);
+      this._musicNext += this._musicStepDur;
+      this._musicStep++;
+    }
+  }
+
+  _playMusicStep(time, step) {
+    // 16-step arpeggio: 4 bars of 4 (Am, F, C, Em).
+    const arp = [
+      220.0, 261.63, 329.63, 261.63, // Am: A3 C4 E4 C4
+      174.61, 220.0, 261.63, 220.0, // F:  F3 A3 C4 A3
+      261.63, 329.63, 392.0, 329.63, // C:  C4 E4 G4 E4
+      164.81, 196.0, 246.94, 196.0, // Em: E3 G3 B3 G3
+    ];
+    const bass = [110.0, 87.31, 130.81, 82.41]; // A2 F2 C2 E2 per bar
+
+    const idx = step % arp.length;
+    this._pluck(time, arp[idx], 0.1);
+
+    // New bass note at the top of each 4-step bar.
+    if (step % 4 === 0) {
+      const bar = Math.floor((step % arp.length) / 4);
+      this._bassNote(time, bass[bar], 0.16);
+    }
+  }
+
+  _pluck(time, freq, peak) {
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(peak, time + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.9);
+    osc.connect(g).connect(this.musicGain);
+    osc.start(time);
+    osc.stop(time + 0.95);
+  }
+
+  _bassNote(time, freq, peak) {
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const sub = this.ctx.createOscillator(); // sub octave for warmth
+    sub.type = 'sine';
+    sub.frequency.value = freq / 2;
+    const g = this.ctx.createGain();
+    const dur = this._musicStepDur * 4;
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(peak, time + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    osc.connect(g);
+    sub.connect(g);
+    g.connect(this.musicGain);
+    osc.start(time);
+    sub.start(time);
+    osc.stop(time + dur + 0.05);
+    sub.stop(time + dur + 0.05);
   }
 
   // ---- stingers ----
