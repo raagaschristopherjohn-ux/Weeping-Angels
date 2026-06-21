@@ -109,11 +109,19 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
   → start at 1, **+1 every 20s, capped at 6**. (≥3 Angels by midgame.)
 - **Speed:** `speedMultiplier(t) = 1 + 0.05 * floor(t / 15)`
   → **+5% every 15s**.
-- **Angel snap distance:** `angelStepDistance(t, objects) = 1.53 * 1.25 *
+- **Angel snap distance:** `angelStepDistance(t, objects) = 1.53 * 1.25 * 0.975 *
   speedMultiplier(t) * (1 + 0.10 * objects)`
-  → base **1.53 m**, a **+25% baseline bump**, the time curve, **and +10% per
-  relic collected** (≈+50% at 5). Difficulty tracks *player progress*, not just
-  time.
+  → base **1.53 m**, a **+25% baseline bump**, a **global −2.5%** scale, the time
+  curve, **and +10% per relic collected** (≈+50% at 5). Difficulty tracks *player
+  progress*, not just time. The two phasing angels apply an extra **×0.98**.
+
+### Movement rule (`src/enemy.js`)
+
+- **Seen-first:** a normal angel may only move *after the player has seen it at
+  least once*. Until then it stays frozen, even during a forced blink.
+- **Two phasing exceptions:** the first two angels may move while unseen even
+  before they're ever seen (they hunt your live position) — but pay a **2% speed
+  penalty** for the privilege.
 - **Step cadence:** `stepInterval(t) = max(0.4, 0.8 / speedMultiplier(t))`
   → steps quicken over time but never below 0.4s, so motion stays legible.
 
@@ -166,10 +174,10 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
    BPM rising from ~48 to ~140 as the nearest unseen Angel closes in.
 7. **False cues** — occasional faint grind from a random direction with no real
    Angel behind it.
-8. **Background music** — a clearly-audible, looping, minor-key horror score: a
-   triangle arpeggio + shifting sub-bass through a 4-bar progression (Am–F–C–Em)
-   with a sparse ringing high tone, sequenced against `AudioContext.currentTime`.
-   Routed straight to master so it plays continuously. Also procedural — no files.
+8. **Background music** — a slow, dissonant, *melody-free* horror score: a
+   shifting low drone with detuned beating + minor-2nd clusters, occasional bowed
+   tritone swells and faint high "shivers", through a dark lowpass. Sequenced
+   against `AudioContext.currentTime`. Also procedural — no files.
 9. **Footsteps** — soft scuff (low-passed noise) + body thud on a walking
    cadence whenever the player moves, with slight left/right weight variation.
 10. **Objective cues** — pickup / placement / beacon-discovery / activation chimes.
@@ -255,10 +263,10 @@ README.md
 ## Known limitations / next steps
 
 - **Angels phase through walls.** They snap straight toward your last-known
-  position and ignore maze walls (supernatural, and it keeps the threat real even
-  in a maze). Visibility *does* respect walls, so the tension is about managing
-  what you can see. A nav-grid / A* path would make them corridor-bound instead —
-  flag if you'd prefer that.
+  position and ignore maze walls (supernatural). Visibility *does* respect walls.
+  Normal angels only move once you've seen them; the two phasing exceptions move
+  while unseen (at −2% speed). A nav-grid / A* path would make them corridor-bound
+  instead — flag if you'd prefer that.
 - **The maze regenerates per page load, not per restart.** "Play Again" reshuffles
   spawns/relics/beacon within the same maze; reload for a brand-new maze. Easy to
   switch to per-restart regeneration if you'd rather.

@@ -29,6 +29,7 @@ export const BASE_STEP_DISTANCE = 1.53; // metres an angel snaps per step at t=0
 // Objective-driven speed scaling (ties difficulty to player progress).
 export const BASE_SPEED_BUMP = 1.25; // +25% baseline over the old base speed
 export const PER_OBJECT_SPEED = 0.1; // +10% per collected object (≈+50% at 5)
+export const GLOBAL_SPEED_SCALE = 0.975; // global -2.5% across all angels
 
 /**
  * Number of Angels that should be active at elapsed time `t`.
@@ -91,5 +92,5 @@ export function stepDistanceFor(t, base = BASE_STEP_DISTANCE) {
 export function angelStepDistance(t, objectsCollected = 0, base = BASE_STEP_DISTANCE) {
   const objs = Math.max(0, Number.isFinite(objectsCollected) ? objectsCollected : 0);
   const objMult = 1 + PER_OBJECT_SPEED * objs;
-  return base * BASE_SPEED_BUMP * speedMultiplier(t) * objMult;
+  return base * BASE_SPEED_BUMP * GLOBAL_SPEED_SCALE * speedMultiplier(t) * objMult;
 }

@@ -95,14 +95,22 @@ export class Enemy {
    *   @param {number} [opts.stepDistance=1.7] metres per discrete snap
    *   @param {THREE.Vector3} [opts.position] spawn position
    *   @param {boolean} [opts.decoy=false] inert statue that never moves
+   *   @param {boolean} [opts.canPhaseUnseen=false] may move before ever being
+   *      seen (an exception to the strict "seen-first" rule)
+   *   @param {number} [opts.speedFactor=1] per-angel speed multiplier
    */
   constructor(scene, opts = {}) {
     this.id = _nextId++;
     this.scene = scene;
     this.stepDistance = opts.stepDistance ?? 1.7;
     this.decoy = !!opts.decoy;
+    this.canPhaseUnseen = !!opts.canPhaseUnseen;
+    this.speedFactor = opts.speedFactor ?? 1;
 
     this.seen = false;
+    // Strict rule: a normal angel may only move once the player has seen it at
+    // least once. Phasing-exception angels ignore this and may move while unseen.
+    this.hasBeenSeen = false;
     this.stepTimer = 0;
 
     // Where the Angel "remembers" the player to be — updated each time it is
@@ -152,12 +160,21 @@ export class Enemy {
 
     if (seen) {
       // Frozen. Remember where the player is right now, then do nothing.
+      this.hasBeenSeen = true;
       this.lastKnownPlayer.copy(playerPos);
       if (!wasSeen) this._setObservedLook(true);
       return;
     }
 
     if (wasSeen) this._setObservedLook(false);
+
+    // Strict rule: only angels the player has already seen may move — unless
+    // this angel is a phasing exception (then it may move while unseen).
+    if (!this.hasBeenSeen && !this.canPhaseUnseen) return;
+
+    // Phasing-exception angels track the player live (they may never have been
+    // "seen" to memorise a last-known position, so they hunt the current spot).
+    if (this.canPhaseUnseen && !this.hasBeenSeen) this.lastKnownPlayer.copy(playerPos);
 
     this.stepTimer += dt;
     if (this.stepTimer >= stepIntervalSec) {
@@ -172,6 +189,8 @@ export class Enemy {
    */
   forceStep(playerPos, stepDistance, onStep) {
     if (this.decoy) return;
+    // The strict "seen-first" rule applies to forced-blink moves too.
+    if (!this.hasBeenSeen && !this.canPhaseUnseen) return;
     this.lastKnownPlayer.copy(playerPos);
     this.stepTimer = 0;
     this._snap(stepDistance, onStep);

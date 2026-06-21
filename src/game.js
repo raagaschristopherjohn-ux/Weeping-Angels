@@ -420,8 +420,15 @@ export class Game {
     );
     const pool = far.length ? far : cells;
     const spot = pool[Math.floor(Math.random() * pool.length)];
+    // The first two angels are phasing exceptions: they may move while unseen
+    // (no "seen-first" requirement) but pay a 2% speed penalty for it.
+    const isPhaser = this.enemies.length < 2;
     this.enemies.push(
-      new Enemy(this.scene, { position: new THREE.Vector3(spot.x, 0, spot.z) })
+      new Enemy(this.scene, {
+        position: new THREE.Vector3(spot.x, 0, spot.z),
+        canPhaseUnseen: isPhaser,
+        speedFactor: isPhaser ? 0.98 : 1,
+      })
     );
   }
 
@@ -524,7 +531,7 @@ export class Game {
       });
 
       if (!this.blinkActive) {
-        enemy.update(dt, seen, playerPos, interval, stepDist, onSnap);
+        enemy.update(dt, seen, playerPos, interval, stepDist * enemy.speedFactor, onSnap);
       } else {
         enemy.seen = false;
       }
@@ -667,7 +674,7 @@ export class Game {
         this.audio.angelMovementSound(p.x, p.y + 1, p.z, prox);
       };
       for (const enemy of this.enemies) {
-        enemy.forceStep(playerPos, stepDist, onSnap);
+        enemy.forceStep(playerPos, stepDist * enemy.speedFactor, onSnap);
       }
     }
   }

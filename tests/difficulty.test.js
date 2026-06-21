@@ -10,6 +10,7 @@ import {
   BASE_STEP_DISTANCE,
   BASE_SPEED_BUMP,
   PER_OBJECT_SPEED,
+  GLOBAL_SPEED_SCALE,
 } from '../src/difficulty.js';
 import {
   isCaught,
@@ -89,8 +90,11 @@ describe('stepDistanceFor (+5% snap distance every 15s)', () => {
 });
 
 describe('angelStepDistance (baseline bump + per-object scaling)', () => {
-  it('applies the +25% baseline at t=0 with no objects', () => {
-    expect(angelStepDistance(0, 0)).toBeCloseTo(BASE_STEP_DISTANCE * BASE_SPEED_BUMP, 5);
+  it('applies the +25% baseline and global -2.5% at t=0 with no objects', () => {
+    expect(angelStepDistance(0, 0)).toBeCloseTo(
+      BASE_STEP_DISTANCE * BASE_SPEED_BUMP * GLOBAL_SPEED_SCALE,
+      5
+    );
   });
 
   it('adds +10% per object collected (~+50% at 5)', () => {
@@ -100,9 +104,14 @@ describe('angelStepDistance (baseline bump + per-object scaling)', () => {
     expect(PER_OBJECT_SPEED).toBe(0.1);
   });
 
+  it('applies the global 2.5% reduction', () => {
+    expect(GLOBAL_SPEED_SCALE).toBe(0.975);
+  });
+
   it('stacks with the time-based multiplier', () => {
     // t=15 => speedMultiplier 1.05; 2 objects => 1.2
-    const expected = BASE_STEP_DISTANCE * BASE_SPEED_BUMP * 1.05 * 1.2;
+    const expected =
+      BASE_STEP_DISTANCE * BASE_SPEED_BUMP * GLOBAL_SPEED_SCALE * 1.05 * 1.2;
     expect(angelStepDistance(15, 2)).toBeCloseTo(expected, 5);
   });
 

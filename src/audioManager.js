@@ -410,12 +410,18 @@ export class AudioManager {
     const t = this.ctx.currentTime;
     this.musicGain = this.ctx.createGain();
     this.musicGain.gain.setValueAtTime(0, t);
-    this.musicGain.gain.linearRampToValueAtTime(0.42, t + 2.5); // clearly audible
-    // Straight to master so the score stays present (not ducked by silence cues).
-    this.musicGain.connect(this.master);
+    this.musicGain.gain.linearRampToValueAtTime(0.5, t + 4); // slow, dread fade-in
+    // A dark lowpass over the whole score keeps it muffled and oppressive.
+    this.musicFilter = this.ctx.createBiquadFilter();
+    this.musicFilter.type = 'lowpass';
+    this.musicFilter.frequency.value = 900;
+    this.musicFilter.Q.value = 0.5;
+    this.musicGain.connect(this.musicFilter);
+    this.musicFilter.connect(this.master);
     this._musicRunning = true;
     this._musicNext = t + 0.2;
     this._musicStep = 0;
+    this._musicStepDur = 1.5; // slow, sparse — no melody
   }
 
   stopMusic() {
@@ -426,8 +432,13 @@ export class AudioManager {
     this.musicGain.gain.linearRampToValueAtTime(0, t + 0.6);
     this._musicRunning = false;
     const g = this.musicGain;
+    const f = this.musicFilter;
     this.musicGain = null;
-    setTimeout(() => g.disconnect(), 800);
+    this.musicFilter = null;
+    setTimeout(() => {
+      g.disconnect();
+      if (f) f.disconnect();
+    }, 800);
   }
 
   /** Drive the music sequencer. Call every frame while playing. */
@@ -444,62 +455,78 @@ export class AudioManager {
   }
 
   _playMusicStep(time, step) {
-    // 16-step arpeggio: 4 bars of 4 (Am, F, C, Em).
-    const arp = [
-      220.0, 261.63, 329.63, 261.63, // Am: A3 C4 E4 C4
-      174.61, 220.0, 261.63, 220.0, // F:  F3 A3 C4 A3
-      261.63, 329.63, 392.0, 329.63, // C:  C4 E4 G4 E4
-      164.81, 196.0, 246.94, 196.0, // Em: E3 G3 B3 G3
-    ];
-    const bass = [110.0, 87.31, 130.81, 82.41]; // A2 F2 C2 E2 per bar
+    // No melody — a slow, shifting dark drone with dissonant minor-2nd clusters
+    // and the occasional bowed tritone swell / high "shiver". Roots descend
+    // chromatically for unease (D2, C2, Eb2, B1).
+    const roots = [73.42, 65.41, 77.78, 61.74];
+    const bar = Math.floor(step / 4) % roots.length;
+    const root = roots[bar];
 
-    const idx = step % arp.length;
-    this._pluck(time, arp[idx], 0.16);
-
-    // New bass note at the top of each 4-step bar.
+    // Long low drone + a quiet minor-2nd above it (the dissonance) each bar.
     if (step % 4 === 0) {
-      const bar = Math.floor((step % arp.length) / 4);
-      this._bassNote(time, bass[bar], 0.22);
+      const dur = this._musicStepDur * 4 * 1.05;
+      this._droneNote(time, root, dur, 0.5);
+      this._droneNote(time, root * 1.0595, dur, 0.16); // minor 2nd — unsettling
     }
 
-    // Sparse, eerie high tone every other bar for unease (a held dissonance).
-    if (step % 8 === 2) {
-      this._pluck(time, 659.25, 0.05); // E5, faint and ringing
+    // Mid bar: a bowed tritone an octave up, swelling in and out.
+    if (step % 4 === 2) {
+      this._swell(time, root * 2 * 1.4142, this._musicStepDur * 1.9, 0.1);
+    }
+
+    // Occasional faint high shiver (a close dissonant cluster).
+    if (Math.random() < 0.16) {
+      const f = root * 4 * 1.0595;
+      this._swell(time + Math.random() * 0.7, f, 1.3, 0.05);
     }
   }
 
-  _pluck(time, freq, peak) {
-    const osc = this.ctx.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.value = freq;
+  /** Sustained, detuned low drone with a sub octave (ominous bed). */
+  _droneNote(time, freq, dur, peak) {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(peak, time + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.9);
-    osc.connect(g).connect(this.musicGain);
-    osc.start(time);
-    osc.stop(time + 0.95);
-  }
-
-  _bassNote(time, freq, peak) {
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    const sub = this.ctx.createOscillator(); // sub octave for warmth
-    sub.type = 'sine';
-    sub.frequency.value = freq / 2;
-    const g = this.ctx.createGain();
-    const dur = this._musicStepDur * 4;
-    g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(peak, time + 0.15);
+    g.gain.exponentialRampToValueAtTime(peak, time + 0.6); // slow attack
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-    osc.connect(g);
-    sub.connect(g);
     g.connect(this.musicGain);
-    osc.start(time);
-    sub.start(time);
-    osc.stop(time + dur + 0.05);
-    sub.stop(time + dur + 0.05);
+    const voices = [
+      ['sine', freq, 1],
+      ['sine', freq * 1.005, 0.7], // detune → slow beating
+      ['sine', freq / 2, 0.6], // sub octave
+    ];
+    for (const [type, f, mul] of voices) {
+      const o = this.ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = this.ctx.createGain();
+      og.gain.value = mul;
+      o.connect(og).connect(g);
+      o.start(time);
+      o.stop(time + dur + 0.1);
+    }
+  }
+
+  /** A bowed, detuned dissonant tone that swells in and fades (string-like). */
+  _swell(time, freq, dur, peak) {
+    const o = this.ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = freq;
+    const o2 = this.ctx.createOscillator();
+    o2.type = 'sawtooth';
+    o2.frequency.value = freq * 1.012; // beating
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1100;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(peak, time + dur * 0.45); // slow swell
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    o.connect(lp);
+    o2.connect(lp);
+    lp.connect(g).connect(this.musicGain);
+    o.start(time);
+    o2.start(time);
+    o.stop(time + dur + 0.1);
+    o2.stop(time + dur + 0.1);
   }
 
   // ---- footsteps ----
