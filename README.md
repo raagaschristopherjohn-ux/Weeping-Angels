@@ -46,8 +46,8 @@ npm test          # one-shot (vitest run)
 npm run test:watch
 ```
 
-Current status: **38 tests passing** across `tests/visibility.test.js` and
-`tests/difficulty.test.js`.
+Current status: **50 tests passing** across `tests/visibility.test.js`,
+`tests/difficulty.test.js`, and `tests/dread.test.js`.
 
 ---
 
@@ -90,12 +90,13 @@ Edge cases handled and commented in-source:
 
 ### Enemy AI (`src/enemy.js`)
 
-Each Angel tracks its own observed state. While **unseen**, it steps toward the
-player's last-known position on a timer; each step is a short *animated* lerp so
-the motion reads clearly when you look back. The moment it is **seen**, all
-motion halts immediately — including freezing mid-step — and resumes only once
-unobserved again. It remembers where you were each time it's observed and lunges
-toward that spot.
+Each Angel tracks its own observed state. While **unseen**, it **snaps** a
+discrete distance toward the player's last-known position on a timer — it does
+**not** glide, so the instant it re-enters view it visibly occupies a new spot.
+The moment it is **seen**, it freezes. It remembers where you were each time it's
+observed and lunges toward that spot. The model is a hunched, asymmetric figure
+mid-reach (`buildAngelMesh`), reused for inert **decoy statues** (`opts.decoy`)
+that never move — so you have to actually watch rather than pattern-match.
 
 ### Difficulty scaling — exact curve (`src/difficulty.js`)
 
@@ -104,9 +105,26 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
 - **Enemy count:** `activeEnemies(t) = clamp(1 + floor(t / 20), 1, 6)`
   → start at 1, **+1 every 20s, capped at 6**. (≥3 Angels by midgame.)
 - **Speed:** `speedMultiplier(t) = 1 + 0.05 * floor(t / 15)`
-  → **+5% every 15s** (scales each step's distance).
+  → **+5% every 15s**.
+- **Step distance:** `stepDistanceFor(t) = 1.7 * speedMultiplier(t)`
+  → base **1.7 m** per snap, growing 5%/15s. The base is large enough that one
+  missed glance is genuinely costly.
 - **Step cadence:** `stepInterval(t) = max(0.4, 0.8 / speedMultiplier(t))`
   → steps quicken over time but never below 0.4s, so motion stays legible.
+
+### Forced blink, dread & level design (`src/game.js`, `src/dread.js`)
+
+- **Forced blink:** every **4–6s** the screen blacks out for **150–250ms** (you
+  can't prevent it) and **every** Angel gets one free move while you're blind —
+  preceded by a silence cue and a synced light flicker.
+- **Dread meter** (`computeDread`, pure + tested): rises while an Angel is close
+  **and** unseen (within 14 m), decays when safe, clamped to [0, 1]. Drives a
+  tightening/darkening vignette, desaturation, camera sway, and the audio dread
+  layers.
+- **Level design:** a central wall blocks the spawn→exit diagonal so the **exit
+  is never visible from spawn**; staggered walls create pockets so you can't keep
+  multiple Angels in view from one spot (line-of-sight contention is the main
+  difficulty).
 
 ### Win / Lose (`src/gameRules.js`)
 
@@ -118,16 +136,32 @@ Isolated, testable formulas, guarded against `t ≤ 0` / non-finite input:
 
 ### Sound (`src/audioManager.js`)
 
-100% procedural via the Web Audio API — **no audio files**:
-ambient detuned drone with a slow filter wobble, a movement stinger pitched by
-how close the stepping Angel is, and descending/rising win/lose stingers. The
-`AudioContext` is created on first click to satisfy browser autoplay policy.
+100% procedural via the Web Audio API — **no audio files**. Layers:
+
+1. **Ambient bed** — 55/56.5/110 Hz detuned oscillators through an LFO-swept lowpass.
+2. **Dread layers** — a dissonant pad + noise hiss that crossfade in with the dread meter.
+3. **Silence as a cue** — the whole atmosphere ducks to near-zero for ~300–500ms
+   before a forced blink or a close unseen-Angel event, so the stinger lands in silence.
+4. **Angel movement** — a bandpass-swept noise "stone grind" (~100ms) + sub-bass
+   thump, fired exactly on the snap frame.
+5. **Spatial audio** — movement/false cues run through HRTF `PannerNode`s placed
+   at the Angel's world position (with the listener tracking the camera), so you
+   can sense movement behind you.
+6. **Heartbeat** — scheduled against `AudioContext.currentTime` (not `setInterval`),
+   BPM rising from ~48 to ~140 as the nearest unseen Angel closes in.
+7. **False cues** — occasional faint grind from a random direction with no real
+   Angel behind it.
+
+The `AudioContext` is created on first click to satisfy browser autoplay policy.
 
 ### Lighting (`src/lighting.js`)
 
-Dim blue ambient + a faint directional fill, plus a warm **flickering point
-light** ("lantern") that follows the player, driven from the game loop with
-layered sines and occasional sharp dropouts. Tints red on loss, green on win.
+Low ambient + a faint directional fill, plus a narrow **flashlight-style
+spotlight** bound to the camera, so the periphery is genuinely dark and you only
+ever light what you look at directly. A sharp flicker is `pulseFlicker`-ed on the
+exact frames Angels are allowed to move (forced blink, some snaps), so you can't
+tell movement from a failing bulb. Flicker depth scales with the dread meter;
+tints red on loss, green on win.
 
 ### Robustness & performance
 
@@ -151,15 +185,17 @@ src/
   main.js          entry point
   game.js          orchestration (only file touching renderer + DOM)
   player.js        FPS camera, pointer lock, WASD
-  enemy.js         Angel AI (discrete stepping, freeze-on-sight)
+  enemy.js         Angel AI (snap stepping, freeze-on-sight) + decoy statues
   visibility.js    pure "is this enemy seen?" (FOV + occlusion)
   difficulty.js    pure scaling curves
+  dread.js         pure dread-meter logic
   gameRules.js     pure win/lose evaluation
-  audioManager.js  procedural Web Audio
-  lighting.js      ambient + flickering lantern
+  audioManager.js  procedural Web Audio (ambient, dread, spatial, heartbeat…)
+  lighting.js      low ambient + camera-bound flashlight
 tests/
   visibility.test.js
   difficulty.test.js   (also covers gameRules win/lose logic)
+  dread.test.js
 README.md
 ```
 
@@ -167,12 +203,12 @@ README.md
 
 ## Verification performed
 
-- `npm test` → **38/38 passing**.
+- `npm test` → **50/50 passing**.
 - `npm run build` → clean production bundle.
-- Headless **Playwright** smoke test (`--use-gl=swiftshader`): page loads, the
-  WebGL canvas renders, the start overlay shows, clicking starts the game and
-  the HUD goes live (timer / Angel count / nearest distance), and there are
-  **zero console errors / page errors**.
+- Headless **Playwright** end-to-end (`--use-gl=swiftshader`): page loads, the
+  How-to-Play start screen shows, clicking starts the game and the HUD goes live,
+  the flashlight cone + lunging Angel render, a forced blink fires, and the
+  win → restart → lose flow all work with **zero console errors / page errors**.
 
 > Pointer Lock can't engage in headless mode, so mouse-look was verified
 > manually in a desktop browser: lock on click, look with mouse, Esc releases

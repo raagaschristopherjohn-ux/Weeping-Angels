@@ -27,10 +27,22 @@
       #hud .label { color: #a6adc8; }
       #hud .danger { color: #f38ba8; }
 
-      /* Vignette to sell the dread */
+      /* Vignette to sell the dread (driven by the dread meter from JS) */
       #vignette {
         position: absolute; inset: 0; pointer-events: none; z-index: 4;
         box-shadow: inset 0 0 180px 40px rgba(0, 0, 0, 0.45);
+        transition: box-shadow 0.12s linear;
+      }
+
+      /* Forced-blink blackout: covers the 3D view, not the overlays */
+      #blink {
+        position: absolute; inset: 0; pointer-events: none; z-index: 6;
+        background: #000; opacity: 0;
+      }
+      #dread-tint {
+        position: absolute; inset: 0; pointer-events: none; z-index: 4;
+        background: radial-gradient(ellipse at center, transparent 40%, rgba(40,0,0,0.0) 100%);
+        opacity: 0;
       }
 
       /* Overlays */
@@ -46,13 +58,22 @@
       .overlay p { font-size: 17px; color: #bac2de; max-width: 560px; line-height: 1.6; }
       .overlay .hint { font-size: 15px; color: #89b4fa; margin-top: 8px; }
       .overlay.hidden { display: none; }
-      .overlay ul { text-align: left; color: #bac2de; font-size: 15px; line-height: 1.8; }
+      .overlay ul { text-align: left; color: #bac2de; font-size: 15px; line-height: 1.7; max-width: 600px; }
+      .overlay .how {
+        text-align: left; max-width: 620px; background: rgba(20,22,32,0.6);
+        border: 1px solid #313244; border-radius: 10px; padding: 18px 22px;
+      }
+      .overlay .how h2 { font-size: 16px; color: #f9e2af; margin-bottom: 8px; letter-spacing: 1px; }
+      .overlay .how li b { color: #f5c2e7; }
+      .overlay .how .rule { color: #f38ba8; font-weight: bold; }
     </style>
   </head>
   <body>
     <div id="app">
       <div id="crosshair" class="hidden"></div>
       <div id="vignette"></div>
+      <div id="dread-tint"></div>
+      <div id="blink"></div>
 
       <div id="hud" class="hidden">
         <div><span class="label">TIME LEFT:</span> <span id="hud-time">90</span>s</div>
@@ -61,19 +82,42 @@
         <div id="hud-warning" class="danger"></div>
       </div>
 
-      <!-- Start screen -->
+      <!-- Start screen + How to Play -->
       <div id="overlay-start" class="overlay">
         <h1>WEEPING ANGELS</h1>
-        <p>
-          They only move when you can't see them. The instant you look away, they
-          step closer. Don't blink. Don't turn your back. Survive 90 seconds — or
-          reach the green exit beacon.
-        </p>
-        <ul>
-          <li><b>WASD</b> — move</li>
-          <li><b>Mouse</b> — look</li>
-          <li><b>Esc</b> — release cursor (pauses)</li>
-        </ul>
+        <div class="how">
+          <h2>HOW TO PLAY</h2>
+          <ul>
+            <li>
+              <span class="rule">The core rule:</span> the Angels move
+              <b>only when you are not looking at them</b>. While an Angel is in
+              your view, it is frozen — the instant it leaves your view, it
+              <b>snaps</b> closer. Keep them in sight.
+            </li>
+            <li><b>Controls:</b> <b>WASD</b> to move, <b>mouse</b> to look,
+              <b>Esc</b> to release the cursor (pauses the game).</li>
+            <li>
+              <span class="rule">Forced blink:</span> every few seconds the screen
+              <b>blacks out for a moment</b> — you can't stop it, and
+              <b>every</b> Angel gets a free move while you're blind. Position
+              yourself before it happens.
+            </li>
+            <li>
+              <span class="rule">Danger zone:</span> if any Angel reaches
+              <b>~1.6 m</b> of you, it's game over. The HUD shows the nearest
+              Angel's distance and warns you when one is close.
+            </li>
+            <li>
+              <span class="rule">Win:</span> survive <b>90 seconds</b>, or reach
+              the <b>green exit beacon</b>. The exit is hidden from your start —
+              you'll have to turn away from danger to find it.
+            </li>
+            <li>
+              Beware <b>decoy statues</b>: some figures never move. Only watching
+              closely tells a statue from a stalking Angel.
+            </li>
+          </ul>
+        </div>
         <p class="hint">Click anywhere to lock the cursor and begin.</p>
       </div>
 
