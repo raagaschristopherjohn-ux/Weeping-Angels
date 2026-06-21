@@ -153,6 +153,7 @@ export class Enemy {
     // least once. Phasing-exception angels ignore this and may move while unseen.
     this.hasBeenSeen = false;
     this.stepTimer = 0;
+    this.frozenTimer = 0; // seconds remaining frozen in place (beacon events)
 
     // Where the Angel "remembers" the player to be — updated each time it is
     // observed (it lunges toward where you last looked at it from).
@@ -164,6 +165,7 @@ export class Enemy {
     this.material = built.material;
     this.eyeMaterial = built.eyeMaterial;
     if (opts.position) this.group.position.copy(opts.position);
+    this.spawnPos = this.group.position.clone(); // original spawn (for resets)
     // Random facing for decoys/spawns so they don't all point the same way.
     this.group.rotation.y = Math.random() * Math.PI * 2;
     this.radius = 0.55; // visibility "body radius"
@@ -210,6 +212,12 @@ export class Enemy {
 
     if (wasSeen) this._setObservedLook(false);
 
+    // Frozen in place by a beacon event — count down and do nothing.
+    if (this.frozenTimer > 0) {
+      this.frozenTimer = Math.max(0, this.frozenTimer - dt);
+      return;
+    }
+
     // Strict rule: only angels the player has already seen may move — unless
     // this angel is a phasing exception (then it may move while unseen).
     if (!this.hasBeenSeen && !this.canPhaseUnseen) return;
@@ -231,11 +239,26 @@ export class Enemy {
    */
   forceStep(playerPos, stepDistance, onStep) {
     if (this.decoy) return;
+    if (this.frozenTimer > 0) return; // frozen — no forced-blink move either
     // The strict "seen-first" rule applies to forced-blink moves too.
     if (!this.hasBeenSeen && !this.canPhaseUnseen) return;
     this.lastKnownPlayer.copy(playerPos);
     this.stepTimer = 0;
     this._snap(stepDistance, onStep);
+  }
+
+  /** Add freeze time (stacks). The angel cannot move while frozen. */
+  freeze(seconds) {
+    if (this.decoy) return;
+    this.frozenTimer += seconds;
+  }
+
+  /** Teleport back to the original spawn point. */
+  resetToSpawn() {
+    if (this.decoy) return;
+    this.group.position.copy(this.spawnPos);
+    this.stepTimer = 0;
+    this.seen = false;
   }
 
   /** Instantly move stepDistance toward the last-known player position. */

@@ -29,6 +29,9 @@ const WALL_HEIGHT = 4.5;
 const NUM_OBJECTS = 5;
 const PICKUP_RADIUS = 1.9;
 const DELIVER_RADIUS = 3.6;
+const BEACON_SAFE_RADIUS = 5; // angels cannot catch you within this of the beacon
+const DISCOVER_FREEZE = 4; // phasers frozen this long on first discovery
+const PLACE_FREEZE = 6; // phasers frozen this long per object placed (stacks)
 const DISCOVER_RADIUS = 9; // beacon auto-discovered within this range
 const DISCOVER_SIGHT = 28; // ...or seen (clear LoS) within this range
 const ANGEL_MIN_SPAWN_DIST = 26; // angels never spawn closer than this to player
@@ -231,6 +234,22 @@ export class Game {
     glow.position.set(0, 2.6, 0);
     group.add(glow);
     this.beaconGlow = glow;
+
+    // Safe-zone marker: a glowing ring on the floor at the safe radius.
+    const safeRing = new THREE.Mesh(
+      new THREE.RingGeometry(BEACON_SAFE_RADIUS - 0.35, BEACON_SAFE_RADIUS, 48),
+      new THREE.MeshStandardMaterial({
+        color: 0x0a3322,
+        emissive: 0x33ffaa,
+        emissiveIntensity: 0.9,
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+      })
+    );
+    safeRing.rotation.x = -Math.PI / 2;
+    safeRing.position.y = 0.06;
+    group.add(safeRing);
 
     this.scene.add(group);
     this.beaconGroup = group;
@@ -644,22 +663,27 @@ export class Game {
 
     this._applyCameraFeel(dt);
 
-    // Lose check (proximity) — find the catching angel for the jumpscare.
-    let caught = null;
-    let caughtDist = Infinity;
-    for (const enemy of this.enemies) {
-      const d = enemy.distanceTo(playerPos);
-      if (d <= LOSE_RADIUS && d < caughtDist) {
-        caughtDist = d;
-        caught = enemy;
+    // Beacon safe zone: angels cannot catch you while you're inside its radius.
+    const inSafeZone = dist(playerPos, this.beacon.pos) <= BEACON_SAFE_RADIUS;
+
+    if (!inSafeZone) {
+      // Lose check (proximity) — find the catching angel for the jumpscare.
+      let caught = null;
+      let caughtDist = Infinity;
+      for (const enemy of this.enemies) {
+        const d = enemy.distanceTo(playerPos);
+        if (d <= LOSE_RADIUS && d < caughtDist) {
+          caughtDist = d;
+          caught = enemy;
+        }
+      }
+      if (caught) {
+        this._triggerJumpscare(caught);
+        return;
       }
     }
-    if (caught) {
-      this._triggerJumpscare(caught);
-      return;
-    }
 
-    this._updateHUD(nearest, desired);
+    this._updateHUD(nearest, desired, inSafeZone);
   }
 
   _updateObjectives(playerPos) {
@@ -692,12 +716,16 @@ export class Game {
         this.beaconPillarMat.emissiveIntensity = 1.4;
         this.beaconRing.material.emissive.setHex(0x33aaff);
         this.audio.discoverCue();
-        this._toast('Beacon discovered!');
+        // First-discovery event: banish all angels to spawn; freeze phasers 4s.
+        this._sendAngelsToSpawn();
+        this._freezePhasers(DISCOVER_FREEZE);
+        this._toast('Beacon discovered — the Angels recoil!');
       }
     }
 
     // Delivery: drop ALL held into the next free slots (order/batch agnostic).
     if (bd < DELIVER_RADIUS && this.heldCount > 0) {
+      let placedThisTrip = 0;
       while (this.heldCount > 0 && this.placedCount < NUM_OBJECTS) {
         const slot = this.beacon.slots[this.placedCount];
         slot.filled = true;
@@ -706,13 +734,33 @@ export class Game {
         this.audio.placeCue(this.placedCount);
         this.placedCount++;
         this.heldCount--;
+        placedThisTrip++;
       }
-      this._toast(`Placed ${this.placedCount}/${NUM_OBJECTS}`);
+      if (placedThisTrip > 0) {
+        // Reset angels to spawn; freeze phasers 6s PER object (stacks).
+        this._sendAngelsToSpawn();
+        this._freezePhasers(PLACE_FREEZE * placedThisTrip);
+        this._toast(
+          `Placed ${this.placedCount}/${NUM_OBJECTS} — phasers frozen ${
+            PLACE_FREEZE * placedThisTrip
+          }s`
+        );
+      }
       if (this.placedCount >= NUM_OBJECTS) {
         this.audio.beaconActivateCue();
         this._victory();
       }
     }
+  }
+
+  /** Teleport every angel back to its original spawn point. */
+  _sendAngelsToSpawn() {
+    for (const e of this.enemies) e.resetToSpawn();
+  }
+
+  /** Add freeze time to every phasing-capable angel (stacks). */
+  _freezePhasers(seconds) {
+    for (const e of this.enemies) if (e.canPhaseUnseen) e.freeze(seconds);
   }
 
   _randBlinkInterval() {
@@ -821,7 +869,7 @@ export class Game {
     );
   }
 
-  _updateHUD(nearest, count) {
+  _updateHUD(nearest, count, inSafeZone = false) {
     this.dom.held.textContent = this.heldCount;
     this.dom.placed.textContent = this.placedCount;
     this.dom.angels.textContent = count;
@@ -833,8 +881,14 @@ export class Game {
     } else {
       this.dom.beacon.textContent = 'undiscovered';
     }
-    this.dom.warning.textContent =
-      nearest < LOSE_RADIUS * 2.2 ? '⚠ AN ANGEL IS CLOSE — DO NOT LOOK AWAY' : '';
+    if (inSafeZone) {
+      this.dom.warning.textContent = '✓ SAFE ZONE — the Angels cannot reach you';
+      this.dom.warning.style.color = '#a6e3a1';
+    } else {
+      this.dom.warning.style.color = '';
+      this.dom.warning.textContent =
+        nearest < LOSE_RADIUS * 2.2 ? '⚠ AN ANGEL IS CLOSE — DO NOT LOOK AWAY' : '';
+    }
   }
 
   /** Brief on-screen status message. */

@@ -152,6 +152,14 @@ sockets, a gaping maw, and a furrowed brow.
   incrementally* both work. The beacon only appears on the HUD once **discovered**
   (proximity or line of sight). HUD shows held/placed; toasts + audio cues fire on
   pickup, discovery, each placement, and activation.
+- **Beacon safe zone:** within `BEACON_SAFE_RADIUS` (5 m, shown as a green floor
+  ring) angels **cannot catch you** — the proximity check is disabled there.
+- **Beacon events:**
+  - **First discovery:** all angels are banished to their original spawn points,
+    and phasing angels are **frozen for 4 s**.
+  - **Each placement:** all angels reset to spawn again, and phasing angels freeze
+    for **6 s per object** — and it **stacks**, so placing 2 at once freezes them
+    for 12 s, 3 for 18 s, etc.
 - **Forced blink:** every **4–6s** the screen blacks out for **150–250ms** (you
   can't prevent it) and **every** Angel gets one free move — preceded by a silence
   cue and a synced light flicker.
